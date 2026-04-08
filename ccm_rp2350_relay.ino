@@ -137,13 +137,26 @@ GhRuntime ghRun[GH_CTRL_SLOTS];
 
 // ========== Solar Irrigation Control ==========
 // 積算日射量ベース灌水。PVSS-03 (0-1V=0-1000W/m²) → ADS1110 I2C ADC
+// mode 0: タイマー灌水（従来）、mode 1: 排水率デューティ制御
 struct IrrigationCtrl {
   bool   enabled;
   int    relay_ch;        // 灌水リレーch (0-7, -1=none)
   float  threshold_mj;    // 積算日射量閾値 (MJ/m²) — 到達で灌水開始
-  int    duration_sec;    // 灌水時間 (秒)
+  int    duration_sec;    // 灌水時間 (秒) — mode 0で使用
   float  min_wm2;         // この日射量未満は積算しない (夜間ノイズ除外)
-  int    drain_stop_sec;  // 排水検知で灌水停止する秒数 (0=無効)
+  int    drain_stop_sec;  // 排水検知で灌水停止する秒数 (0=無効, mode 0)
+  // --- デューティモード (mode 1) ---
+  int    mode;            // 0=タイマー, 1=排水率デューティ
+  int    duty_cycle_sec;  // デューティサイクル秒 (e.g. 60)
+  float  duty_init;       // 初期デューティ比 (0.0-1.0, e.g. 0.8)
+  float  duty_min;        // 最小デューティ (e.g. 0.1)
+  float  duty_max;        // 最大デューティ (e.g. 1.0)
+  float  duty_step;       // 1サイクルごとの調整幅 (e.g. 0.05)
+  float  drain_target_lo; // 排水率下限 (e.g. 0.15 = 15%)
+  float  drain_target_hi; // 排水率上限 (e.g. 0.30 = 30%)
+  int    flow_di_ch;      // 灌水流量パルスのDIch (0-1, diPulseCount index)
+  float  flow_ml_per_pulse; // 1パルスあたりmL (e.g. 0.45 for DIGITEN G1)
+  float  drain_ml_per_tip;  // SEN0575 1tipあたりmL (0.2mm×集水面積, e.g. 3.6)
 };
 
 const int IRRI_SLOTS = 2;  // 最大2ルール (e.g. 点滴+ミスト)
@@ -158,6 +171,14 @@ struct IrriRuntime {
   int           today_count;    // 本日の灌水回数
   uint32_t      drain_prev_tips;    // 前回チェック時のtipカウント
   unsigned long drain_active_since; // 排水tip増加が始まった時刻 (0=非検知)
+  // --- デューティモード ランタイム ---
+  float         duty;               // 現在のデューティ比
+  unsigned long duty_cycle_start;   // 現サイクル開始時刻
+  uint32_t      cycle_flow_pulses;  // このサイクルの灌水パルス数
+  uint32_t      cycle_drain_tips;   // このサイクルの排水tip数
+  uint32_t      snap_flow_pulses;   // サイクル開始時のdiPulseCount snapshot
+  uint32_t      snap_drain_tips;    // サイクル開始時のrawTips snapshot
+  float         last_drain_rate;    // 直近の排水率
 };
 IrriRuntime irriRun[IRRI_SLOTS];
 
@@ -1219,11 +1240,22 @@ void loadIrrigationConfig() {
   for (int i = 0; i < IRRI_SLOTS; i++) {
     irriCtrl[i].enabled        = false;
     irriCtrl[i].relay_ch       = -1;
-    irriCtrl[i].threshold_mj   = 0.5;   // 0.5 MJ/m² default
-    irriCtrl[i].duration_sec   = 120;    // 2分 default
-    irriCtrl[i].min_wm2        = 50.0;  // 50 W/m² 未満は積算しない
-    irriCtrl[i].drain_stop_sec = 0;     // 0=排水停止無効
-    irriRun[i] = {0.0, false, 0, 0, 0, 0, 0};
+    irriCtrl[i].threshold_mj   = 0.5;
+    irriCtrl[i].duration_sec   = 120;
+    irriCtrl[i].min_wm2        = 50.0;
+    irriCtrl[i].drain_stop_sec = 0;
+    irriCtrl[i].mode             = 0;
+    irriCtrl[i].duty_cycle_sec   = 60;
+    irriCtrl[i].duty_init        = 0.8;
+    irriCtrl[i].duty_min         = 0.1;
+    irriCtrl[i].duty_max         = 1.0;
+    irriCtrl[i].duty_step        = 0.05;
+    irriCtrl[i].drain_target_lo  = 0.15;
+    irriCtrl[i].drain_target_hi  = 0.30;
+    irriCtrl[i].flow_di_ch       = 0;
+    irriCtrl[i].flow_ml_per_pulse = 0.45;
+    irriCtrl[i].drain_ml_per_tip  = 3.6;
+    memset(&irriRun[i], 0, sizeof(IrriRuntime));
   }
   if (!LittleFS.exists("/irri_ctrl.json")) return;
   File f = LittleFS.open("/irri_ctrl.json", "r");
@@ -1235,12 +1267,23 @@ void loadIrrigationConfig() {
   int idx = 0;
   for (JsonObject r : arr) {
     if (idx >= IRRI_SLOTS) break;
-    irriCtrl[idx].enabled        = r["enabled"]        | false;
-    irriCtrl[idx].relay_ch       = r["relay_ch"]        | -1;
-    irriCtrl[idx].threshold_mj   = r["threshold_mj"]    | 0.5;
-    irriCtrl[idx].duration_sec   = r["duration_sec"]    | 120;
-    irriCtrl[idx].min_wm2        = r["min_wm2"]         | 50.0;
-    irriCtrl[idx].drain_stop_sec = r["drain_stop_sec"]  | 0;
+    irriCtrl[idx].enabled        = r["enabled"]          | false;
+    irriCtrl[idx].relay_ch       = r["relay_ch"]          | -1;
+    irriCtrl[idx].threshold_mj   = r["threshold_mj"]      | 0.5;
+    irriCtrl[idx].duration_sec   = r["duration_sec"]      | 120;
+    irriCtrl[idx].min_wm2        = r["min_wm2"]           | 50.0;
+    irriCtrl[idx].drain_stop_sec = r["drain_stop_sec"]    | 0;
+    irriCtrl[idx].mode             = r["mode"]             | 0;
+    irriCtrl[idx].duty_cycle_sec   = r["duty_cycle_sec"]   | 60;
+    irriCtrl[idx].duty_init        = r["duty_init"]        | 0.8;
+    irriCtrl[idx].duty_min         = r["duty_min"]         | 0.1;
+    irriCtrl[idx].duty_max         = r["duty_max"]         | 1.0;
+    irriCtrl[idx].duty_step        = r["duty_step"]        | 0.05;
+    irriCtrl[idx].drain_target_lo  = r["drain_target_lo"]  | 0.15;
+    irriCtrl[idx].drain_target_hi  = r["drain_target_hi"]  | 0.30;
+    irriCtrl[idx].flow_di_ch       = r["flow_di_ch"]       | 0;
+    irriCtrl[idx].flow_ml_per_pulse = r["flow_ml_pulse"]   | 0.45;
+    irriCtrl[idx].drain_ml_per_tip  = r["drain_ml_tip"]    | 3.6;
     idx++;
   }
   Serial.printf("Irrigation: %d rules loaded\n", idx);
@@ -1257,6 +1300,17 @@ void saveIrrigationConfig() {
     r["duration_sec"]   = irriCtrl[i].duration_sec;
     r["min_wm2"]        = irriCtrl[i].min_wm2;
     r["drain_stop_sec"] = irriCtrl[i].drain_stop_sec;
+    r["mode"]             = irriCtrl[i].mode;
+    r["duty_cycle_sec"]   = irriCtrl[i].duty_cycle_sec;
+    r["duty_init"]        = irriCtrl[i].duty_init;
+    r["duty_min"]         = irriCtrl[i].duty_min;
+    r["duty_max"]         = irriCtrl[i].duty_max;
+    r["duty_step"]        = irriCtrl[i].duty_step;
+    r["drain_target_lo"]  = irriCtrl[i].drain_target_lo;
+    r["drain_target_hi"]  = irriCtrl[i].drain_target_hi;
+    r["flow_di_ch"]       = irriCtrl[i].flow_di_ch;
+    r["flow_ml_pulse"]    = irriCtrl[i].flow_ml_per_pulse;
+    r["drain_ml_tip"]     = irriCtrl[i].drain_ml_per_tip;
   }
   File f = LittleFS.open("/irri_ctrl.json", "w");
   if (!f) return;
@@ -1265,71 +1319,156 @@ void saveIrrigationConfig() {
   Serial.println("Irrigation config saved");
 }
 
+// 日射積算 (mode 0/1 共通): 閾値到達で灌水セッション開始
+void irrigationAccumulate(int i, int ch, unsigned long now) {
+  if (irriRun[i].last_sample == 0) {
+    irriRun[i].last_sample = now;
+    return;
+  }
+  unsigned long dt_ms = now - irriRun[i].last_sample;
+  if (dt_ms < 5000) return;
+  irriRun[i].last_sample = now;
+
+  if (g_solar_wm2 >= irriCtrl[i].min_wm2) {
+    float dt_sec = dt_ms / 1000.0;
+    irriRun[i].accum_mj += (g_solar_wm2 * dt_sec) / 1000000.0;
+  }
+
+  if (irriRun[i].accum_mj >= irriCtrl[i].threshold_mj) {
+    claimRelay(ch + 1, OWN_IRRI);
+    irriRun[i].irrigating = true;
+    irriRun[i].irri_start = now;
+    irriRun[i].today_count++;
+
+    if (irriCtrl[i].mode == 1) {
+      // デューティモード: サイクル初期化
+      irriRun[i].duty = irriCtrl[i].duty_init;
+      irriRun[i].duty_cycle_start = now;
+      noInterrupts();
+      irriRun[i].snap_flow_pulses = diPulseCount[irriCtrl[i].flow_di_ch & 1];
+      interrupts();
+      irriRun[i].snap_drain_tips = sen0575_rawTips;
+      irriRun[i].cycle_flow_pulses = 0;
+      irriRun[i].cycle_drain_tips  = 0;
+      Serial.printf("[IRRI] rule%d CH%d DUTY START (accum=%.3f MJ, duty=%.0f%%, #%d)\n",
+                    i + 1, ch + 1, irriRun[i].accum_mj,
+                    irriRun[i].duty * 100, irriRun[i].today_count);
+    } else {
+      Serial.printf("[IRRI] rule%d CH%d ON (accum=%.3f MJ >= %.3f, #%d)\n",
+                    i + 1, ch + 1, irriRun[i].accum_mj,
+                    irriCtrl[i].threshold_mj, irriRun[i].today_count);
+    }
+  }
+}
+
+// Mode 0: タイマー灌水 (従来)
+void irrigationMode0(int i, int ch, unsigned long now) {
+  bool timeUp = (now - irriRun[i].irri_start) >= (unsigned long)irriCtrl[i].duration_sec * 1000UL;
+
+  bool drainStop = false;
+  if (sen0575_detected && irriCtrl[i].drain_stop_sec > 0) {
+    if (sen0575_rawTips > irriRun[i].drain_prev_tips) {
+      if (irriRun[i].drain_active_since == 0) {
+        irriRun[i].drain_active_since = now;
+      } else if ((now - irriRun[i].drain_active_since) >= (unsigned long)irriCtrl[i].drain_stop_sec * 1000UL) {
+        drainStop = true;
+      }
+      irriRun[i].drain_prev_tips = sen0575_rawTips;
+    } else {
+      irriRun[i].drain_active_since = 0;
+    }
+  }
+
+  if (timeUp || drainStop) {
+    releaseRelay(ch + 1, OWN_IRRI);
+    irriRun[i].irrigating = false;
+    Serial.printf("[IRRI] rule%d CH%d OFF (%s, accum=%.3f MJ, count=%d)\n",
+                  i + 1, ch + 1, drainStop ? "drain_stop" : "done",
+                  irriRun[i].accum_mj, irriRun[i].today_count);
+    irriRun[i].accum_mj = 0.0;
+    irriRun[i].drain_active_since = 0;
+  }
+}
+
+// Mode 1: 排水率デューティ制御
+void irrigationMode1(int i, int ch, unsigned long now) {
+  unsigned long cycleDur = (unsigned long)irriCtrl[i].duty_cycle_sec * 1000UL;
+  if (cycleDur == 0) cycleDur = 60000;
+  unsigned long elapsed = now - irriRun[i].duty_cycle_start;
+
+  // サイクル内: duty比でON/OFF
+  unsigned long onDur = (unsigned long)(irriRun[i].duty * cycleDur);
+  bool shouldOn = (elapsed < onDur);
+
+  if (shouldOn) claimRelay(ch + 1, OWN_IRRI);
+  else          releaseRelay(ch + 1, OWN_IRRI);
+
+  // サイクル末: 排水率計算 → duty調整 → 次サイクル
+  if (elapsed >= cycleDur) {
+    // パルスカウント取得
+    noInterrupts();
+    uint32_t curFlow = diPulseCount[irriCtrl[i].flow_di_ch & 1];
+    interrupts();
+    uint32_t curDrain = sen0575_rawTips;
+
+    irriRun[i].cycle_flow_pulses = curFlow - irriRun[i].snap_flow_pulses;
+    irriRun[i].cycle_drain_tips  = curDrain - irriRun[i].snap_drain_tips;
+
+    // 排水率 (mL比)
+    float flowMl  = irriRun[i].cycle_flow_pulses * irriCtrl[i].flow_ml_per_pulse;
+    float drainMl = irriRun[i].cycle_drain_tips  * irriCtrl[i].drain_ml_per_tip;
+    float drainRate = (flowMl > 0.1) ? (drainMl / flowMl) : 0.0;
+    irriRun[i].last_drain_rate = drainRate;
+
+    // duty調整
+    float prevDuty = irriRun[i].duty;
+    if (drainRate < irriCtrl[i].drain_target_lo) {
+      irriRun[i].duty += irriCtrl[i].duty_step;  // 乾き気味 → duty上げ
+    } else if (drainRate > irriCtrl[i].drain_target_hi) {
+      irriRun[i].duty -= irriCtrl[i].duty_step;  // 過湿 → duty下げ
+    }
+    // clamp
+    if (irriRun[i].duty < irriCtrl[i].duty_min) irriRun[i].duty = irriCtrl[i].duty_min;
+    if (irriRun[i].duty > irriCtrl[i].duty_max) irriRun[i].duty = irriCtrl[i].duty_max;
+
+    Serial.printf("[IRRI] rule%d cycle: flow=%upls(%.1fmL) drain=%utips(%.1fmL) rate=%.1f%% duty=%.0f%%->%.0f%%\n",
+                  i + 1, irriRun[i].cycle_flow_pulses, flowMl,
+                  irriRun[i].cycle_drain_tips, drainMl,
+                  drainRate * 100, prevDuty * 100, irriRun[i].duty * 100);
+
+    // 排水率が上限超え かつ duty最小 → セッション終了
+    if (drainRate >= irriCtrl[i].drain_target_hi && irriRun[i].duty <= irriCtrl[i].duty_min) {
+      releaseRelay(ch + 1, OWN_IRRI);
+      irriRun[i].irrigating = false;
+      irriRun[i].accum_mj = 0.0;
+      Serial.printf("[IRRI] rule%d CH%d DUTY END (drain saturated, count=%d)\n",
+                    i + 1, ch + 1, irriRun[i].today_count);
+      return;
+    }
+
+    // 次サイクル開始
+    irriRun[i].duty_cycle_start = now;
+    irriRun[i].snap_flow_pulses = curFlow;
+    irriRun[i].snap_drain_tips  = curDrain;
+  }
+}
+
 void irrigationControl(unsigned long now) {
-  if (!ads1110_detected || isnan(g_solar_wm2)) return;
+  if (!ads1110_detected && isnan(g_solar_wm2)) return;
 
   for (int i = 0; i < IRRI_SLOTS; i++) {
     if (!irriCtrl[i].enabled || irriCtrl[i].relay_ch < 0) continue;
     int ch = irriCtrl[i].relay_ch;
 
-    // 灌水中 → 時間経過 or 排水検知で停止
     if (irriRun[i].irrigating) {
-      bool timeUp = (now - irriRun[i].irri_start) >= (unsigned long)irriCtrl[i].duration_sec * 1000UL;
-
-      // 排水検知: SEN0575のtipが増え続けたらdrain_stop_sec後に停止
-      bool drainStop = false;
-      if (sen0575_detected && irriCtrl[i].drain_stop_sec > 0) {
-        if (sen0575_rawTips > irriRun[i].drain_prev_tips) {
-          // tipが増えた → 排水発生中
-          if (irriRun[i].drain_active_since == 0) {
-            irriRun[i].drain_active_since = now;  // 初回検知
-          } else if ((now - irriRun[i].drain_active_since) >= (unsigned long)irriCtrl[i].drain_stop_sec * 1000UL) {
-            drainStop = true;
-          }
-          irriRun[i].drain_prev_tips = sen0575_rawTips;
-        } else {
-          // tipが増えていない → リセット
-          irriRun[i].drain_active_since = 0;
-        }
-      }
-
-      if (timeUp || drainStop) {
-        releaseRelay(ch + 1, OWN_IRRI);
-        irriRun[i].irrigating = false;
-        Serial.printf("[IRRI] rule%d CH%d OFF (%s, accum=%.3f MJ, count=%d)\n",
-                      i + 1, ch + 1, drainStop ? "drain_stop" : "done",
-                      irriRun[i].accum_mj, irriRun[i].today_count);
-        irriRun[i].accum_mj = 0.0;
-        irriRun[i].drain_active_since = 0;
-      }
-      continue;  // 灌水中は積算しない
-    }
-
-    // 積算 (SENSOR_INTERVAL秒ごとにreadSensorsが呼ばれる前提)
-    if (irriRun[i].last_sample == 0) {
-      irriRun[i].last_sample = now;
+      if (irriCtrl[i].mode == 1)
+        irrigationMode1(i, ch, now);
+      else
+        irrigationMode0(i, ch, now);
       continue;
     }
-    unsigned long dt_ms = now - irriRun[i].last_sample;
-    if (dt_ms < 5000) continue;  // 最低5秒間隔
-    irriRun[i].last_sample = now;
 
-    if (g_solar_wm2 >= irriCtrl[i].min_wm2) {
-      // W/m² × 秒 → J/m² → MJ/m²
-      float dt_sec = dt_ms / 1000.0;
-      irriRun[i].accum_mj += (g_solar_wm2 * dt_sec) / 1000000.0;
-    }
-
-    // 閾値到達 → 灌水開始
-    if (irriRun[i].accum_mj >= irriCtrl[i].threshold_mj) {
-      claimRelay(ch + 1, OWN_IRRI);
-      irriRun[i].irrigating = true;
-      irriRun[i].irri_start = now;
-      irriRun[i].today_count++;
-      Serial.printf("[IRRI] rule%d CH%d ON (accum=%.3f MJ >= %.3f, #%d)\n",
-                    i + 1, ch + 1, irriRun[i].accum_mj,
-                    irriCtrl[i].threshold_mj, irriRun[i].today_count);
-    }
+    irrigationAccumulate(i, ch, now);
   }
 }
 
@@ -2004,12 +2143,19 @@ void sendAPIState(WiFiClient& client) {
     ir["duration_sec"]   = irriCtrl[i].duration_sec;
     ir["min_wm2"]        = irriCtrl[i].min_wm2;
     ir["drain_stop_sec"] = irriCtrl[i].drain_stop_sec;
+    ir["mode"]           = irriCtrl[i].mode;
     ir["accum_mj"]       = round(irriRun[i].accum_mj * 1000) / 1000.0;
     ir["irrigating"]     = irriRun[i].irrigating;
     ir["today_count"]    = irriRun[i].today_count;
-    if (irriRun[i].irrigating) {
+    if (irriRun[i].irrigating && irriCtrl[i].mode == 0) {
       ir["remaining_sec"] = irriCtrl[i].duration_sec -
         (int)((millis() - irriRun[i].irri_start) / 1000);
+    }
+    if (irriCtrl[i].mode == 1) {
+      ir["duty"]         = round(irriRun[i].duty * 100);
+      ir["drain_rate"]   = round(irriRun[i].last_drain_rate * 1000) / 10.0;
+      ir["cycle_flow"]   = irriRun[i].cycle_flow_pulses;
+      ir["cycle_drain"]  = irriRun[i].cycle_drain_tips;
     }
   }
 
@@ -2541,7 +2687,7 @@ void sendIrrigationPage(WiFiClient& client) {
   // Config form
   client.println("<h3>Settings</h3>");
   client.println("<form method=POST action=/api/irrigation>");
-  client.println("<table><tr><th>Rule</th><th>Enable</th><th>Relay CH</th><th>Threshold(MJ/m&sup2;)</th><th>Duration(s)</th><th>Min W/m&sup2;</th><th>Drain Stop(s)</th></tr>");
+  client.println("<table><tr><th>Rule</th><th>Enable</th><th>Relay CH</th><th>Mode</th><th>Threshold(MJ/m&sup2;)</th><th>Min W/m&sup2;</th></tr>");
   for (int i = 0; i < IRRI_SLOTS; i++) {
     client.printf("<tr><td>%d</td>", i + 1);
     client.printf("<td><input type=checkbox name=en%d value=1%s></td>", i, irriCtrl[i].enabled ? " checked" : "");
@@ -2551,18 +2697,56 @@ void sendIrrigationPage(WiFiClient& client) {
       client.printf("<option value=%d%s>CH%d</option>", c, irriCtrl[i].relay_ch == c ? " selected" : "", c + 1);
     }
     client.printf("</select></td>");
+    client.printf("<td><select name=md%d><option value=0%s>Timer</option><option value=1%s>Duty</option></select></td>",
+                  i, irriCtrl[i].mode == 0 ? " selected" : "", irriCtrl[i].mode == 1 ? " selected" : "");
     client.printf("<td><input type=number name=th%d value=%.3f min=0.01 max=10 step=0.01></td>", i, irriCtrl[i].threshold_mj);
+    client.printf("<td><input type=number name=mw%d value=%.0f min=0 max=500 step=10></td></tr>", i, irriCtrl[i].min_wm2);
+  }
+  client.println("</table>");
+
+  // Mode 0: Timer settings
+  client.println("<h4>Timer Mode (mode=0)</h4>");
+  client.println("<table><tr><th>Rule</th><th>Duration(s)</th><th>Drain Stop(s)</th></tr>");
+  for (int i = 0; i < IRRI_SLOTS; i++) {
+    client.printf("<tr><td>%d</td>", i + 1);
     client.printf("<td><input type=number name=du%d value=%d min=10 max=3600></td>", i, irriCtrl[i].duration_sec);
-    client.printf("<td><input type=number name=mw%d value=%.0f min=0 max=500 step=10></td>", i, irriCtrl[i].min_wm2);
     client.printf("<td><input type=number name=ds%d value=%d min=0 max=300 step=5></td></tr>", i, irriCtrl[i].drain_stop_sec);
   }
   client.println("</table>");
+
+  // Mode 1: Duty settings
+  client.println("<h4>Duty Mode (mode=1)</h4>");
+  client.println("<table><tr><th>Rule</th><th>Cycle(s)</th><th>Init Duty%</th><th>Min%</th><th>Max%</th><th>Step%</th><th>Drain Lo%</th><th>Drain Hi%</th></tr>");
+  for (int i = 0; i < IRRI_SLOTS; i++) {
+    client.printf("<tr><td>%d</td>", i + 1);
+    client.printf("<td><input type=number name=dc%d value=%d min=10 max=600></td>", i, irriCtrl[i].duty_cycle_sec);
+    client.printf("<td><input type=number name=di%d value=%.0f min=0 max=100></td>", i, irriCtrl[i].duty_init * 100);
+    client.printf("<td><input type=number name=dn%d value=%.0f min=0 max=100></td>", i, irriCtrl[i].duty_min * 100);
+    client.printf("<td><input type=number name=dx%d value=%.0f min=0 max=100></td>", i, irriCtrl[i].duty_max * 100);
+    client.printf("<td><input type=number name=dt%d value=%.0f min=1 max=50></td>", i, irriCtrl[i].duty_step * 100);
+    client.printf("<td><input type=number name=dl%d value=%.0f min=0 max=100></td>", i, irriCtrl[i].drain_target_lo * 100);
+    client.printf("<td><input type=number name=dh%d value=%.0f min=0 max=100></td></tr>", i, irriCtrl[i].drain_target_hi * 100);
+  }
+  client.println("</table>");
+
+  // Sensor calibration
+  client.println("<h4>Sensor Calibration</h4>");
+  client.println("<table><tr><th>Rule</th><th>Flow DI</th><th>mL/pulse</th><th>Drain mL/tip</th></tr>");
+  for (int i = 0; i < IRRI_SLOTS; i++) {
+    client.printf("<tr><td>%d</td>", i + 1);
+    client.printf("<td><select name=fd%d><option value=0%s>DI1</option><option value=1%s>DI2</option></select></td>",
+                  i, irriCtrl[i].flow_di_ch == 0 ? " selected" : "", irriCtrl[i].flow_di_ch == 1 ? " selected" : "");
+    client.printf("<td><input type=number name=fp%d value=%.3f min=0.01 max=100 step=0.01></td>", i, irriCtrl[i].flow_ml_per_pulse);
+    client.printf("<td><input type=number name=dp%d value=%.2f min=0.1 max=100 step=0.1></td></tr>", i, irriCtrl[i].drain_ml_per_tip);
+  }
+  client.println("</table>");
+
   client.println("<input type=submit value='Save'>");
   client.println("</form>");
-  client.println("<p class=note>Threshold: accumulated solar energy to trigger irrigation (typical: 0.3-1.0 MJ/m&sup2;).<br>");
-  client.println("Duration: how long irrigation runs per trigger.<br>");
-  client.println("Min W/m&sup2;: ignore solar readings below this (nighttime noise filter, default 50).<br>");
-  client.println("Drain Stop: stop irrigation if SEN0575 detects drain flow for N seconds (0=disabled, requires SEN0575).</p>");
+  client.println("<p class=note><b>Timer mode</b>: solar threshold triggers, runs for Duration seconds, optional drain stop.<br>");
+  client.println("<b>Duty mode</b>: solar threshold triggers, then duty cycle adjusts based on drain rate feedback.<br>");
+  client.println("Drain rate = (drain mL) / (flow mL). Duty increases when below Lo%, decreases above Hi%.<br>");
+  client.println("Session ends when drain rate exceeds Hi% and duty reaches minimum.</p>");
 
   // Auto-refresh JS
   client.println("<script>");
@@ -2592,7 +2776,10 @@ void sendIrrigationPage(WiFiClient& client) {
   client.println("h+='<td>'+r.accum_mj.toFixed(3)+' MJ/m&sup2;</td>';");
   client.println("h+='<td>'+r.threshold_mj+' MJ/m&sup2;</td>';");
   client.println("h+='<td><div class=bar><div class=fill style=\"background:'+(r.irrigating?'#42a5f5':'#43a047')+';width:'+pct+'%\"></div></div> '+pct.toFixed(0)+'%</td>';");
-  client.println("h+='<td class='+(r.irrigating?'on':'off')+'><b>'+(r.irrigating?'WATERING'+(r.remaining_sec?' ('+r.remaining_sec+'s)':''):'Accumulating')+'</b></td>';");
+  client.println("var st=r.irrigating?'WATERING':'Accumulating';");
+  client.println("if(r.irrigating&&r.mode==1)st='DUTY '+r.duty+'% (drain:'+r.drain_rate+'%)';");
+  client.println("else if(r.irrigating&&r.remaining_sec)st='WATERING ('+r.remaining_sec+'s)';");
+  client.println("h+='<td class='+(r.irrigating?'on':'off')+'><b>'+st+'</b></td>';");
   client.println("h+='<td><b>'+r.today_count+'</b></td></tr>';}");
   client.println("h+='</table>';}else{h+='<span class=off>No rules configured</span>';}");
   client.println("document.getElementById('irrirun').innerHTML=h;");
@@ -2635,10 +2822,41 @@ void handleIrrigationPost(WiFiClient& client, const String& body) {
     String ds = getField(String("ds") + i);
     if (ds.length() > 0) irriCtrl[i].drain_stop_sec = ds.toInt();
 
+    String md = getField(String("md") + i);
+    if (md.length() > 0) irriCtrl[i].mode = md.toInt();
+
+    String dc = getField(String("dc") + i);
+    if (dc.length() > 0) irriCtrl[i].duty_cycle_sec = dc.toInt();
+
+    String di = getField(String("di") + i);
+    if (di.length() > 0) irriCtrl[i].duty_init = di.toFloat() / 100.0;
+
+    String dn = getField(String("dn") + i);
+    if (dn.length() > 0) irriCtrl[i].duty_min = dn.toFloat() / 100.0;
+
+    String dx = getField(String("dx") + i);
+    if (dx.length() > 0) irriCtrl[i].duty_max = dx.toFloat() / 100.0;
+
+    String dt_s = getField(String("dt") + i);
+    if (dt_s.length() > 0) irriCtrl[i].duty_step = dt_s.toFloat() / 100.0;
+
+    String dl = getField(String("dl") + i);
+    if (dl.length() > 0) irriCtrl[i].drain_target_lo = dl.toFloat() / 100.0;
+
+    String dh = getField(String("dh") + i);
+    if (dh.length() > 0) irriCtrl[i].drain_target_hi = dh.toFloat() / 100.0;
+
+    String fd = getField(String("fd") + i);
+    if (fd.length() > 0) irriCtrl[i].flow_di_ch = fd.toInt();
+
+    String fp = getField(String("fp") + i);
+    if (fp.length() > 0) irriCtrl[i].flow_ml_per_pulse = fp.toFloat();
+
+    String dp = getField(String("dp") + i);
+    if (dp.length() > 0) irriCtrl[i].drain_ml_per_tip = dp.toFloat();
+
     // Reset runtime on config change
-    irriRun[i].accum_mj = 0.0;
-    irriRun[i].last_sample = 0;
-    irriRun[i].drain_active_since = 0;
+    memset(&irriRun[i], 0, sizeof(IrriRuntime));
   }
 
   saveIrrigationConfig();
