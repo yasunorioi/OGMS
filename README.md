@@ -6,6 +6,14 @@ Arduino firmware for **Waveshare RP2350-ETH-8DI-8RO / RP2350-POE-ETH-8DI-8RO**.
 
 > Firmware file: `ccm_rp2350_relay.ino` (将来 agri-relay にリネーム予定)
 
+### ボード購入先
+
+| ボード | 購入先 |
+|--------|--------|
+| RP2350-ETH-8DI-8RO | [Waveshare公式](https://www.waveshare.com/rp2350-eth-8di-8ro.htm) / [スイッチサイエンス (Waveshare製品)](https://www.switch-science.com/) / [Amazon](https://www.amazon.com/dp/B0FVF19VRR) |
+| RP2350-POE-ETH-8DI-8RO (PoE版) | [Waveshare公式](https://www.waveshare.com/rp2350-poe-eth-8di-8ro.htm) / [Amazon](https://www.amazon.com/dp/B0FVF19VRR) |
+| M5Stack ADC Unit V1.1 (日射センサー用) | [M5Stack公式](https://shop.m5stack.com/products/adc-i2c-unit-v1-1-ads1100) / [スイッチサイエンス](https://www.switch-science.com/) |
+
 ## 機能一覧
 
 | 機能 | 実装 |
