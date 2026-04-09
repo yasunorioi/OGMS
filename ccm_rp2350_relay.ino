@@ -1893,6 +1893,8 @@ input[type=submit]{background:#1976d2;color:#fff;border:none;padding:8px 20px;bo
 select{padding:3px;background:#1a1a1f;color:#eee;border:1px solid #3e3e44;border-radius:3px}
 a{color:#d0d6e0}.note{color:#8a8f98;font-size:0.85em}
 .msg{margin:8px 0;padding:6px;font-weight:bold}
+.badge-ok{background:#1b5e20;padding:2px 6px;border-radius:3px;font-size:0.85em}
+.badge-ng{background:#b71c1c;padding:2px 6px;border-radius:3px;font-size:0.85em}
 @media(max-width:600px){
   table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
   input[type=number],input[type=text],select{width:100%;box-sizing:border-box}
@@ -1991,6 +1993,7 @@ function load(){
       '<b>Node:</b> '+d.node_id+' | <b>FW:</b> '+d.version+
       ' | <b>Protocol:</b> <span style="color:#ffa726">UECS-CCM</span>'+
       ' | <b>Uptime:</b> '+d.uptime+'s'+
+      ' | <b>Last:</b> '+(d.last_updated||'-')+
       ' | <a href="/ccm">CCM</a> | <a href="/greenhouse">Greenhouse</a> | <a href="/irrigation">Irrigation</a> | <a href="/protection">Protection</a> | <a href="/config">Network</a> | <a href="/ota">FW</a>';
     var mdnsHost=d.mdns_hostname?(' | <b>mDNS:</b> '+d.mdns_hostname):'';
     document.getElementById('net').innerHTML=
@@ -1998,14 +2001,15 @@ function load(){
       ' | <b>GW:</b> '+d.gateway+mdnsHost+
       '<br><b>MAC:</b> '+d.mac+
       ' | <b>CCM:</b> 224.0.0.1:16520';
-    var solSrc=d.ads1110_ok?'<span class=on>ADS1110</span>':(d.sensor&&d.sensor.solar_wm2!==null?'<span class=on>CCM</span>':'<span class=off>none</span>');
+    var solSrc=d.ads1110_ok?'<span class=badge-ok>ADS1110 \u2713</span>':(d.sensor&&d.sensor.solar_wm2!==null?'<span class=badge-ok>CCM \u2713</span>':'<span class=badge-ng>none \u2717</span>');
     var solVal=(d.sensor&&d.sensor.solar_wm2!==null)?' '+d.sensor.solar_wm2.toFixed(0)+'W/m&sup2;':'';
     document.getElementById('devstat').innerHTML=
       '<h3>Device Status</h3>'+
-      '<b>I2C:</b> '+(d.sht40_ok?'<span class=on>SHT40</span>':'')+(d.scd41_ok?' <span class=on>SCD41</span>':'')+((!d.sht40_ok&&!d.scd41_ok)?'<span class=off>none</span>':'')+
+      '<b>I2C:</b> '+(d.sht40_ok?'<span class=badge-ok>SHT40 \u2713</span>':'<span class=badge-ng>SHT40 \u2717</span>')+
+      (d.scd41_ok?' <span class=badge-ok>SCD41 \u2713</span>':' <span class=badge-ng>SCD41 \u2717</span>')+
       ' | <b>Solar:</b> '+solSrc+solVal+
-      ' | <b>1-Wire:</b> '+(d.ds18b20_ok?'<span class=on>DS18B20</span>':'<span class=off>none</span>')+
-      ' | <b>UART:</b> '+(d.sen0575_ok?'<span class=on>SEN0575</span>':'<span class=off>none</span>');
+      ' | <b>1-Wire:</b> '+(d.ds18b20_ok?'<span class=badge-ok>DS18B20 \u2713</span>':'<span class=badge-ng>DS18B20 \u2717</span>')+
+      ' | <b>UART:</b> '+(d.sen0575_ok?'<span class=badge-ok>SEN0575 \u2713</span>':'<span class=badge-ng>SEN0575 \u2717</span>');
     var rt='';
     var ccm=d.ccm_map||[];
     for(var i=0;i<8;i++){
@@ -2015,7 +2019,7 @@ function load(){
       rt+='<tr><td>'+(i+1)+'</td><td>'+tname+' <span class=ccm>R'+
         (m.room||'-')+'/Rg'+(m.region||'-')+'/O'+(m.order||'-')+'</span></td>'+
         '<td>'+(m.room||'-')+'</td>'+
-        '<td class="'+(s?'on':'off')+'">'+(s?'ON':'OFF')+'</td>'+
+        '<td class="'+(s?'on':'off')+'">'+(s?'\u2713 ON':'\u2717 OFF')+'</td>'+
         '<td><button class=bon onclick="relay('+(i+1)+',1)">ON</button> '+
         '<button class=bof onclick="relay('+(i+1)+',0)">OFF</button></td></tr>';
     }
@@ -2023,7 +2027,7 @@ function load(){
     var dt='';
     for(var i=0;i<8;i++){
       var s=(d.di_state>>(i))&1;
-      dt+='<tr><td>'+(i+1)+'</td><td class="'+(s?'on':'off')+'">'+(s?'ON':'OFF')+'</td></tr>';
+      dt+='<tr><td>'+(i+1)+'</td><td class="'+(s?'on':'off')+'">'+(s?'\u2713 ON':'\u2717 OFF')+'</td></tr>';
     }
     document.getElementById('dtbl').innerHTML=dt;
     var sv='<h3>Sensors</h3>';
@@ -2046,7 +2050,7 @@ function load(){
         gv+='<td>'+(g.temp!==null?g.temp.toFixed(1)+'C':'-')+'</td>';
         gv+='<td>'+g.temp_open+'-'+g.temp_full+'C</td>';
         gv+='<td>'+g.duty+'%</td>';
-        gv+='<td class='+(g.active?'on':'off')+'>'+(g.active?'ON':'OFF')+'</td></tr>';
+        gv+='<td class='+(g.active?'on':'off')+'>'+(g.active?'\u2713 ON':'\u2717 OFF')+'</td></tr>';
       }
       gv+='</table><p><a href="/greenhouse">Settings</a></p>';
       document.getElementById('gh').innerHTML=gv;
@@ -2063,7 +2067,7 @@ function load(){
       for(var i=0;i<ir.length;i++){var r=ir[i];if(!r.enabled)continue;
         iv+='<tr><td>'+(i+1)+'</td><td>CH'+(r.relay_ch+1)+'</td>';
         iv+='<td>'+r.accum_mj.toFixed(3)+' MJ</td><td>'+r.threshold_mj+' MJ</td>';
-        iv+='<td class='+(r.irrigating?'on':'off')+'>'+(r.irrigating?'WATERING':'Accum.')+'</td>';
+        iv+='<td class='+(r.irrigating?'on':'off')+'>'+(r.irrigating?'\u2713 WATERING':'\u2717 Accum.')+'</td>';
         iv+='<td><b>'+r.today_count+'</b></td></tr>';}
       iv+='</table><p><a href="/irrigation">Settings</a></p>';
       document.getElementById('irri').innerHTML=iv;
@@ -2074,11 +2078,11 @@ function load(){
     var pv='<h3>Protection</h3>';
     var anyP=false;
     if(p.dew&&p.dew.enabled){anyP=true;
-      pv+='<b>Dew:</b> '+(p.dew.active?'<span class=on>ACTIVE</span>':'Standby');
+      pv+='<b>Dew:</b> '+(p.dew.active?'<span class=on>\u2713 ACTIVE</span>':'\u2717 Standby');
       if(p.dew.sunrise)pv+=' (sunrise '+p.dew.sunrise+') ';
       pv+=' | ';}
     if(p.rate&&p.rate.enabled){anyP=true;
-      pv+='<b>Rate Guard:</b> '+(p.rate.active?'<span class=on>ACTIVE</span>':'Normal');
+      pv+='<b>Rate Guard:</b> '+(p.rate.active?'<span class=on>\u2713 ACTIVE</span>':'\u2717 Normal');
       if(p.rate.current_rate!==null)pv+=' ('+p.rate.current_rate.toFixed(1)+'C/min)';}
     if(anyP){pv+=' — <a href="/protection">Settings</a>';
       document.getElementById('prot').innerHTML=pv;
@@ -2243,6 +2247,21 @@ void sendAPIState(WiFiClient& client) {
     co2g["active"] = co2Run.active;
   }
 
+  // Last updated time string
+  {
+    unsigned long ep = getCurrentEpoch();
+    if (ep > 0) {
+      unsigned long hh = (ep % 86400) / 3600;
+      unsigned long mm = (ep % 3600) / 60;
+      unsigned long ss = ep % 60;
+      char tstr[10];
+      snprintf(tstr, sizeof(tstr), "%02lu:%02lu:%02lu", hh, mm, ss);
+      doc["last_updated"] = tstr;
+    } else {
+      doc["last_updated"] = String(millis() / 1000) + "s";
+    }
+  }
+
   char buffer[4096];
   serializeJson(doc, buffer);
 
@@ -2344,10 +2363,10 @@ void sendConfigPage(WiFiClient& client) {
   client.println("input[type=text],input[type=number]{width:220px;padding:4px;background:#1a1a1f;color:#eee;border:1px solid #3e3e44;border-radius:3px}</style></head><body>");
   client.println("<h2>Network Configuration</h2>");
   client.print(NAV_LINKS); client.println();
-  client.println("<form action=/api/config onsubmit=\"return submitForm(this,this.querySelector('[type=submit]'))\">");
+  client.println("<form action=/api/config onsubmit=\"if(!confirm('Save and reboot?'))return false;return submitForm(this,this.querySelector('[type=submit]'))\">");
   client.println("<div class=sec><h3>Identity</h3>");
-  client.printf("<label>node_id<input type=text name=node_id value='%s'></label>\n", nodeId.c_str());
-  client.printf("<label>node_name<input type=text name=node_name value='%s'></label>\n", nodeName.c_str());
+  client.printf("<label for=node_id>node_id</label><input id=node_id type=text name=node_id value='%s'>\n", nodeId.c_str());
+  client.printf("<label for=node_name>node_name</label><input id=node_name type=text name=node_name value='%s'>\n", nodeName.c_str());
   client.println("</div>");
   client.println("<div class=sec><h3>IP Address</h3>");
   client.println("<p class=note>Leave IP blank for DHCP.</p>");
@@ -2590,10 +2609,10 @@ void sendGreenhousePage(WiFiClient& client) {
 
   // Config form
   client.println("<form action=/api/greenhouse onsubmit=\"return ghSubmit(this,this.querySelector('[type=submit]'))\">");
-  client.println("<table><tr><th>Rule</th><th>Enable</th><th>CH</th><th>Sensor</th><th>Open(C)</th><th>Full(C)</th><th>Cycle(s)</th></tr>");
+  client.println("<table><tr><th>Rule</th><th>Enable</th><th>CH</th><th>Sensor</th><th title='Relay starts opening at this temp'>Open(C)</th><th title='100% duty at this temp'>Full(C)</th><th>Cycle(s)</th></tr>");
   for (int i = 0; i < GH_CTRL_SLOTS; i++) {
     client.printf("<tr><td>%d</td>", i + 1);
-    client.printf("<td><input type=checkbox name=en%d value=1%s></td>", i, ghCtrl[i].enabled ? " checked" : "");
+    client.printf("<td><input type=checkbox name=en%d id=en%d aria-label='Enable rule %d' value=1%s></td>", i, i, i+1, ghCtrl[i].enabled ? " checked" : "");
     // CH select
     client.printf("<td><select name=ch%d>", i);
     client.printf("<option value=-1%s>-</option>", ghCtrl[i].ch < 0 ? " selected" : "");
@@ -2618,6 +2637,8 @@ void sendGreenhousePage(WiFiClient& client) {
   client.println("<script>");
   client.print(FORM_JS);
   client.println("function ghSubmit(form,btn){");
+  client.println("var anyEn=false;for(var i=0;i<4;i++){var e=form.querySelector('[name=en'+i+']');if(e&&e.checked)anyEn=true;}");
+  client.println("if(!anyEn&&!confirm('All rules will be disabled. Continue?'))return false;");
   client.println("for(var i=0;i<4;i++){");
   client.println("var to=form.querySelector('[name=to'+i+']');");
   client.println("var tf=form.querySelector('[name=tf'+i+']');");
@@ -2648,7 +2669,7 @@ void sendGreenhousePage(WiFiClient& client) {
   // Duty bar visualization
   client.println("h+='<td><div style=\"background:#2e2e2e;border-radius:3px;height:18px;width:80px;display:inline-block;vertical-align:middle\">';");
   client.println("h+='<div style=\"background:'+(g.duty>70?'#e53935':g.duty>30?'#ffa726':'#43a047')+';height:100%;width:'+g.duty+'%;border-radius:3px\"></div></div> '+g.duty+'%</td>';");
-  client.println("h+='<td class='+(g.active?'on':'off')+'><b>'+(g.active?'ON':'OFF')+'</b></td></tr>';}");
+  client.println("h+='<td class='+(g.active?'on':'off')+'><b>'+(g.active?'\\u2713 ON':'\\u2717 OFF')+'</b></td></tr>';}");
   client.println("h+='</table>';}else{h+='<span class=off>No rules active</span>';}");
   client.println("document.getElementById('ghrun').innerHTML=h;");
   client.println("});}");
@@ -2720,10 +2741,10 @@ void sendIrrigationPage(WiFiClient& client) {
   // Config form
   client.println("<h3>Settings</h3>");
   client.println("<form action=/api/irrigation onsubmit=\"return irriSubmit(this,this.querySelector('[type=submit]'))\">");
-  client.println("<table><tr><th>Rule</th><th>Enable</th><th>Relay CH</th><th>Mode</th><th>Threshold(MJ/m&sup2;)</th><th>Min W/m&sup2;</th></tr>");
+  client.println("<table><tr><th>Rule</th><th>Enable</th><th>Relay CH</th><th>Mode</th><th title='Accumulated MJ/m&sup2; to trigger irrigation'>Threshold(MJ/m&sup2;)</th><th title='Solar threshold: accumulation pauses below this'>Min W/m&sup2;</th></tr>");
   for (int i = 0; i < IRRI_SLOTS; i++) {
     client.printf("<tr><td>%d</td>", i + 1);
-    client.printf("<td><input type=checkbox name=en%d value=1%s></td>", i, irriCtrl[i].enabled ? " checked" : "");
+    client.printf("<td><input type=checkbox name=en%d id=irri_en%d aria-label='Enable rule %d' value=1%s></td>", i, i, i+1, irriCtrl[i].enabled ? " checked" : "");
     client.printf("<td><select name=rc%d>", i);
     client.printf("<option value=-1%s>-</option>", irriCtrl[i].relay_ch < 0 ? " selected" : "");
     for (int c = 0; c < 8; c++) {
@@ -2785,6 +2806,8 @@ void sendIrrigationPage(WiFiClient& client) {
   client.println("<script>");
   client.print(FORM_JS);
   client.println("function irriSubmit(form,btn){");
+  client.println("var anyEn=false;for(var i=0;i<2;i++){var e=form.querySelector('[name=en'+i+']');if(e&&e.checked)anyEn=true;}");
+  client.println("if(!anyEn&&!confirm('All rules will be disabled. Continue?'))return false;");
   client.println("for(var i=0;i<2;i++){");
   client.println("var th=form.querySelector('[name=th'+i+']');");
   client.println("var du=form.querySelector('[name=du'+i+']');");
@@ -2820,9 +2843,9 @@ void sendIrrigationPage(WiFiClient& client) {
   client.println("h+='<td>'+r.accum_mj.toFixed(3)+' MJ/m&sup2;</td>';");
   client.println("h+='<td>'+r.threshold_mj+' MJ/m&sup2;</td>';");
   client.println("h+='<td><div class=bar><div class=fill style=\"background:'+(r.irrigating?'#42a5f5':'#43a047')+';width:'+pct+'%\"></div></div> '+pct.toFixed(0)+'%</td>';");
-  client.println("var st=r.irrigating?'WATERING':'Accumulating';");
-  client.println("if(r.irrigating&&r.mode==1)st='DUTY '+r.duty+'% (drain:'+r.drain_rate+'%)';");
-  client.println("else if(r.irrigating&&r.remaining_sec)st='WATERING ('+r.remaining_sec+'s)';");
+  client.println("var st=r.irrigating?'\\u2713 WATERING':'\\u2717 Accumulating';");
+  client.println("if(r.irrigating&&r.mode==1)st='\\u2713 DUTY '+r.duty+'% (drain:'+r.drain_rate+'%)';");
+  client.println("else if(r.irrigating&&r.remaining_sec)st='\\u2713 WATERING ('+r.remaining_sec+'s)';");
   client.println("h+='<td class='+(r.irrigating?'on':'off')+'><b>'+st+'</b></td>';");
   client.println("h+='<td><b>'+r.today_count+'</b></td></tr>';}");
   client.println("h+='</table>';}else{h+='<span class=off>No rules configured</span>';}");
@@ -2999,6 +3022,8 @@ void sendProtectionPage(WiFiClient& client) {
   client.println("<script>");
   client.print(FORM_JS);
   client.println("function protSubmit(form,btn){");
+  client.println("var dew=form.querySelector('[name=dew_en]'),rate=form.querySelector('[name=rate_en]'),co2=form.querySelector('[name=co2_en]');");
+  client.println("if(!(dew&&dew.checked)&&!(rate&&rate.checked)&&!(co2&&co2.checked)&&!confirm('All protection rules will be disabled. Continue?'))return false;");
   client.println("var rthr=form.querySelector('[name=rthr]');");
   client.println("if(rthr&&parseFloat(rthr.value)<=0){alert('Rate threshold must be > 0');return false;}");
   client.println("return submitForm(form,btn);}");
@@ -3006,12 +3031,12 @@ void sendProtectionPage(WiFiClient& client) {
   client.println("fetch('/api/state').then(function(r){return r.json();}).then(function(d){");
   client.println("var p=d.protection||{};var s='<h3>Status</h3>';");
   client.println("if(p.dew){var dw=p.dew;");
-  client.println("  s+='<b>Dew:</b> '+(dw.enabled?'<span class=on>Enabled</span>':'<span class=off>Disabled</span>');");
+  client.println("  s+='<b>Dew:</b> '+(dw.enabled?'<span class=on>\\u2713 Enabled</span>':'<span class=off>\\u2717 Disabled</span>');");
   client.println("  if(dw.sunrise)s+=' | <b>Sunrise:</b> '+dw.sunrise;");
   client.println("  s+=' | <b>State:</b> '+(dw.active?'<span class=on>ACTIVE</span>':'<span class=off>Standby</span>');");
   client.println("  s+='<br>';}");
   client.println("if(p.rate){var rt=p.rate;");
-  client.println("  s+='<b>Rate Guard:</b> '+(rt.enabled?'<span class=on>Enabled</span>':'<span class=off>Disabled</span>');");
+  client.println("  s+='<b>Rate Guard:</b> '+(rt.enabled?'<span class=on>\\u2713 Enabled</span>':'<span class=off>\\u2717 Disabled</span>');");
   client.println("  if(rt.current_rate!==null)s+=' | <b>Rate:</b> '+rt.current_rate.toFixed(2)+' C/min';");
   client.println("  s+=' | <b>State:</b> '+(rt.active?'<span class=on>ACTIVE</span>':'<span class=off>Normal</span>');}");
   client.println("if(p.co2){var c2=p.co2;s+='<br>';");
