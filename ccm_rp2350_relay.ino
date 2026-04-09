@@ -1892,6 +1892,7 @@ input[type=number]{padding:3px;background:#1a1a1f;color:#eee;border:1px solid #3
 input[type=submit]{background:#1976d2;color:#fff;border:none;padding:8px 20px;border-radius:4px;cursor:pointer;margin-top:10px}
 select{padding:3px;background:#1a1a1f;color:#eee;border:1px solid #3e3e44;border-radius:3px}
 a{color:#d0d6e0}.note{color:#8a8f98;font-size:0.85em}
+.msg{margin:8px 0;padding:6px;font-weight:bold}
 @media(max-width:600px){
   table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
   input[type=number],input[type=text],select{width:100%;box-sizing:border-box}
@@ -1900,6 +1901,30 @@ a{color:#d0d6e0}.note{color:#8a8f98;font-size:0.85em}
 )CSS";
 
 static const char NAV_LINKS[] PROGMEM = "<p><a href='/'>Dashboard</a> | <a href='/ccm'>CCM</a> | <a href='/greenhouse'>Greenhouse</a> | <a href='/irrigation'>Irrigation</a> | <a href='/protection'>Protection</a> | <a href='/config'>Network</a> | <a href='/ota'>FW</a></p>";
+
+static const char FORM_JS[] PROGMEM = R"JS(
+function submitForm(form,btn){
+  btn.disabled=true;btn.dataset.orig=btn.value;btn.value='Saving...';
+  var msg=form.querySelector('.msg');if(msg)msg.textContent='';
+  fetch(form.action,{method:'POST',body:new URLSearchParams(new FormData(form))})
+  .then(function(r){return r.json();})
+  .then(function(d){
+    btn.disabled=false;btn.value=btn.dataset.orig;
+    if(!msg){msg=document.createElement('div');msg.className='msg';form.appendChild(msg);}
+    if(d.ok){
+      msg.style.color='#66bb6a';msg.textContent='\u2713 Saved';
+      if(d.reboot){msg.textContent='\u2713 Saved. Rebooting...';setTimeout(function(){location.href='/';},3000);}
+    }else{msg.style.color='#ef5350';msg.textContent='\u2717 Error: '+(d.error||'Unknown');}
+    setTimeout(function(){msg.textContent='';},5000);
+  })
+  .catch(function(e){
+    btn.disabled=false;btn.value=btn.dataset.orig;
+    if(!msg){msg=document.createElement('div');msg.className='msg';form.appendChild(msg);}
+    msg.style.color='#ef5350';msg.textContent='\u2717 Connection error';
+  });
+  return false;
+}
+)JS";
 
 void sendCommonHead(WiFiClient& client, const char* title) {
   client.println("HTTP/1.1 200 OK");
@@ -2319,7 +2344,7 @@ void sendConfigPage(WiFiClient& client) {
   client.println("input[type=text],input[type=number]{width:220px;padding:4px;background:#1a1a1f;color:#eee;border:1px solid #3e3e44;border-radius:3px}</style></head><body>");
   client.println("<h2>Network Configuration</h2>");
   client.print(NAV_LINKS); client.println();
-  client.println("<form method=POST action=/api/config>");
+  client.println("<form action=/api/config onsubmit=\"return submitForm(this,this.querySelector('[type=submit]'))\">");
   client.println("<div class=sec><h3>Identity</h3>");
   client.printf("<label>node_id<input type=text name=node_id value='%s'></label>\n", nodeId.c_str());
   client.printf("<label>node_name<input type=text name=node_name value='%s'></label>\n", nodeName.c_str());
@@ -2338,7 +2363,11 @@ void sendConfigPage(WiFiClient& client) {
                 mdns_enabled ? " checked" : "");
   client.println("</div>");
   client.println("<input type=submit value='Save &amp; Reboot'>");
-  client.println("</form></body></html>");
+  client.println("</form>");
+  client.println("<script>");
+  client.print(FORM_JS);
+  client.println("</script>");
+  client.println("</body></html>");
 }
 
 // ============================================================
@@ -2357,7 +2386,7 @@ void sendCcmConfigPage(WiFiClient& client) {
   client.println(" &nbsp; <label>Region: <input type=number id=bulkRegion min=1 max=999 style='width:60px'></label>");
   client.println(" <button type=button onclick=\"var v=document.getElementById('bulkRegion').value;if(v)for(var i=0;i<8;i++)document.getElementsByName('region'+i)[0].value=v;\">Apply to All</button>");
   client.println("</div>");
-  client.println("<form method=POST action=/api/ccm>");
+  client.println("<form action=/api/ccm onsubmit=\"return submitForm(this,this.querySelector('[type=submit]'))\">");
   client.println("<table><tr><th>CH</th><th>CCM Type</th><th>Room</th><th>Region</th><th>Order</th><th>Priority</th><th>WDT(s)</th><th>DI Link</th></tr>");
 
   for (int i = 0; i < 8; i++) {
@@ -2389,6 +2418,9 @@ void sendCcmConfigPage(WiFiClient& client) {
   client.println("<input type=submit value='Save CCM Mapping'>");
   client.println("</form>");
   client.println("<p class=note>Changes take effect immediately (no reboot required).</p>");
+  client.println("<script>");
+  client.print(FORM_JS);
+  client.println("</script>");
   client.println("</body></html>");
 }
 
@@ -2461,17 +2493,21 @@ void handleConfigPost(WiFiClient& client, const String& body) {
 
   File f = LittleFS.open("/config.json", "w");
   if (!f) {
-    client.println("HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n");
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: application/json");
+    client.println("Connection: close");
+    client.println();
+    client.println("{\"ok\":false,\"error\":\"Save failed\"}");
     return;
   }
   serializeJson(doc, f);
   f.close();
 
   client.println("HTTP/1.1 200 OK");
-  client.println("Content-Type: text/html; charset=UTF-8");
+  client.println("Content-Type: application/json");
   client.println("Connection: close");
   client.println();
-  client.println("<p>Config saved. Rebooting...</p>");
+  client.println("{\"ok\":true,\"reboot\":true}");
   client.flush();
   delay(500);
   rebootWithReason("config_saved");
@@ -2533,11 +2569,11 @@ void handleCcmConfigPost(WiFiClient& client, const String& body) {
 
   saveCcmMapping();
 
-  // Redirect back to CCM config page
-  client.println("HTTP/1.1 303 See Other");
-  client.println("Location: /ccm");
+  client.println("HTTP/1.1 200 OK");
+  client.println("Content-Type: application/json");
   client.println("Connection: close");
   client.println();
+  client.println("{\"ok\":true}");
 }
 
 // ============================================================
@@ -2553,7 +2589,7 @@ void sendGreenhousePage(WiFiClient& client) {
   client.println("<div class=sec id=ghrun>Loading...</div>");
 
   // Config form
-  client.println("<form method=POST action=/api/greenhouse>");
+  client.println("<form action=/api/greenhouse onsubmit=\"return ghSubmit(this,this.querySelector('[type=submit]'))\">");
   client.println("<table><tr><th>Rule</th><th>Enable</th><th>CH</th><th>Sensor</th><th>Open(C)</th><th>Full(C)</th><th>Cycle(s)</th></tr>");
   for (int i = 0; i < GH_CTRL_SLOTS; i++) {
     client.printf("<tr><td>%d</td>", i + 1);
@@ -2578,8 +2614,18 @@ void sendGreenhousePage(WiFiClient& client) {
   client.println("<input type=submit value='Save'>");
   client.println("</form>");
   client.println("<p class=note>Open: relay starts at this temp. Full: 100% duty at this temp. Cycle: ON+OFF period in seconds.</p>");
-  // Auto-refresh status
+  // Auto-refresh + form JS
   client.println("<script>");
+  client.print(FORM_JS);
+  client.println("function ghSubmit(form,btn){");
+  client.println("for(var i=0;i<4;i++){");
+  client.println("var to=form.querySelector('[name=to'+i+']');");
+  client.println("var tf=form.querySelector('[name=tf'+i+']');");
+  client.println("var en=form.querySelector('[name=en'+i+']');");
+  client.println("if(en&&en.checked&&to&&tf&&parseFloat(to.value)>=parseFloat(tf.value)){");
+  client.println("alert('Rule '+(i+1)+': Open temp must be less than Full temp');");
+  client.println("return false;}}");
+  client.println("return submitForm(form,btn);}");
   client.println("function ghLoad(){");
   client.println("fetch('/api/state').then(function(r){return r.json();}).then(function(d){");
   // Sensor status
@@ -2650,10 +2696,11 @@ void handleGreenhousePost(WiFiClient& client, const String& body) {
 
   saveGreenhouseConfig();
 
-  client.println("HTTP/1.1 303 See Other");
-  client.println("Location: /greenhouse");
+  client.println("HTTP/1.1 200 OK");
+  client.println("Content-Type: application/json");
   client.println("Connection: close");
   client.println();
+  client.println("{\"ok\":true}");
 }
 
 // ============================================================
@@ -2672,7 +2719,7 @@ void sendIrrigationPage(WiFiClient& client) {
 
   // Config form
   client.println("<h3>Settings</h3>");
-  client.println("<form method=POST action=/api/irrigation>");
+  client.println("<form action=/api/irrigation onsubmit=\"return irriSubmit(this,this.querySelector('[type=submit]'))\">");
   client.println("<table><tr><th>Rule</th><th>Enable</th><th>Relay CH</th><th>Mode</th><th>Threshold(MJ/m&sup2;)</th><th>Min W/m&sup2;</th></tr>");
   for (int i = 0; i < IRRI_SLOTS; i++) {
     client.printf("<tr><td>%d</td>", i + 1);
@@ -2734,8 +2781,19 @@ void sendIrrigationPage(WiFiClient& client) {
   client.println("Drain rate = (drain mL) / (flow mL). Duty increases when below Lo%, decreases above Hi%.<br>");
   client.println("Session ends when drain rate exceeds Hi% and duty reaches minimum.</p>");
 
-  // Auto-refresh JS
+  // Auto-refresh + form JS
   client.println("<script>");
+  client.print(FORM_JS);
+  client.println("function irriSubmit(form,btn){");
+  client.println("for(var i=0;i<2;i++){");
+  client.println("var th=form.querySelector('[name=th'+i+']');");
+  client.println("var du=form.querySelector('[name=du'+i+']');");
+  client.println("var en=form.querySelector('[name=en'+i+']');");
+  client.println("if(en&&en.checked){");
+  client.println("if(th&&parseFloat(th.value)<=0){alert('Rule '+(i+1)+': Threshold must be > 0');return false;}");
+  client.println("if(du&&parseInt(du.value)<=0){alert('Rule '+(i+1)+': Duration must be > 0');return false;}");
+  client.println("}}");
+  client.println("return submitForm(form,btn);}");
   client.println("function irLoad(){");
   client.println("fetch('/api/state').then(function(r){return r.json();}).then(function(d){");
   // Solar sensor status
@@ -2847,10 +2905,11 @@ void handleIrrigationPost(WiFiClient& client, const String& body) {
 
   saveIrrigationConfig();
 
-  client.println("HTTP/1.1 303 See Other");
-  client.println("Location: /irrigation");
+  client.println("HTTP/1.1 200 OK");
+  client.println("Content-Type: application/json");
   client.println("Connection: close");
   client.println();
+  client.println("{\"ok\":true}");
 }
 
 // ============================================================
@@ -2866,7 +2925,7 @@ void sendProtectionPage(WiFiClient& client) {
   client.println("<div class=sec id=pstat>Loading...</div>");
 
   // Dew Prevention form
-  client.println("<form method=POST action=/api/protection>");
+  client.println("<form action=/api/protection onsubmit=\"return protSubmit(this,this.querySelector('[type=submit]'))\">");
   client.println("<fieldset><legend>Dew Prevention (結露対策)</legend>");
   client.println("<p class=note>Runs circulation fan / heater before sunrise to prevent condensation.</p>");
   client.println("<table>");
@@ -2936,8 +2995,13 @@ void sendProtectionPage(WiFiClient& client) {
   client.println("<input type=submit value='Save All'>");
   client.println("</form>");
 
-  // Auto-refresh status
+  // Auto-refresh + form JS
   client.println("<script>");
+  client.print(FORM_JS);
+  client.println("function protSubmit(form,btn){");
+  client.println("var rthr=form.querySelector('[name=rthr]');");
+  client.println("if(rthr&&parseFloat(rthr.value)<=0){alert('Rate threshold must be > 0');return false;}");
+  client.println("return submitForm(form,btn);}");
   client.println("function pLoad(){");
   client.println("fetch('/api/state').then(function(r){return r.json();}).then(function(d){");
   client.println("var p=d.protection||{};var s='<h3>Status</h3>';");
@@ -3010,10 +3074,11 @@ void handleProtectionPost(WiFiClient& client, const String& body) {
   saveRateGuardConfig();
   saveCO2GuardConfig();
 
-  client.println("HTTP/1.1 303 See Other");
-  client.println("Location: /protection");
+  client.println("HTTP/1.1 200 OK");
+  client.println("Content-Type: application/json");
   client.println("Connection: close");
   client.println();
+  client.println("{\"ok\":true}");
 }
 
 // ============================================================
