@@ -1878,6 +1878,42 @@ void rebootWithReason(const char* reason) {
 }
 
 // ============================================================
+// WebUI — Common CSS + Helper
+// ============================================================
+static const char COMMON_CSS[] PROGMEM = R"CSS(
+body{font-family:sans-serif;margin:16px;background:#0f1011;color:#f7f8f8}
+h2{color:#5e6ad2}h3{color:#d0d6e0}
+.sec{background:#191a1b;border-radius:6px;padding:12px;margin:8px 0}
+table{border-collapse:collapse;width:100%;margin:6px 0}
+th,td{border:1px solid #2e2e2e;padding:5px 8px}
+th{background:#191a1b;color:#d0d6e0}
+.on{color:#66bb6a;font-weight:bold}.off{color:#ef5350}
+input[type=number]{padding:3px;background:#1a1a1f;color:#eee;border:1px solid #3e3e44;border-radius:3px}
+input[type=submit]{background:#1976d2;color:#fff;border:none;padding:8px 20px;border-radius:4px;cursor:pointer;margin-top:10px}
+select{padding:3px;background:#1a1a1f;color:#eee;border:1px solid #3e3e44;border-radius:3px}
+a{color:#d0d6e0}.note{color:#8a8f98;font-size:0.85em}
+@media(max-width:600px){
+  table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  input[type=number],input[type=text],select{width:100%;box-sizing:border-box}
+  body{margin:8px}
+}
+)CSS";
+
+static const char NAV_LINKS[] PROGMEM = "<p><a href='/'>Dashboard</a> | <a href='/ccm'>CCM</a> | <a href='/greenhouse'>Greenhouse</a> | <a href='/irrigation'>Irrigation</a> | <a href='/protection'>Protection</a> | <a href='/config'>Network</a> | <a href='/ota'>FW</a></p>";
+
+void sendCommonHead(WiFiClient& client, const char* title) {
+  client.println("HTTP/1.1 200 OK");
+  client.println("Content-Type: text/html; charset=UTF-8");
+  client.println("Connection: close");
+  client.println();
+  client.printf("<!DOCTYPE html><html><head><meta charset=UTF-8>");
+  client.printf("<meta name=viewport content='width=device-width,initial-scale=1'>");
+  client.printf("<title>%s</title><style>", title);
+  client.print(COMMON_CSS);
+  client.println("</style>");
+}
+
+// ============================================================
 // WebUI — Dashboard HTML
 // ============================================================
 static const char HTML_PAGE[] = R"RELAY_HTML(
@@ -1899,6 +1935,7 @@ th{background:#191a1b;color:#d0d6e0}
 input[type=number]{width:55px;padding:3px;background:#1a1a1f;color:#eee;border:1px solid #3e3e44;border-radius:3px}
 a{color:#d0d6e0}
 .ccm{color:#ffa726;font-size:0.85em}
+@media(max-width:600px){table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}body{margin:8px}}
 </style>
 </head><body>
 <h2>CCM Relay Node (UECS)</h2>
@@ -2277,21 +2314,11 @@ void sendConfigPage(WiFiClient& client) {
     }
   }
 
-  client.println("HTTP/1.1 200 OK");
-  client.println("Content-Type: text/html; charset=UTF-8");
-  client.println("Connection: close");
-  client.println();
-  client.println("<!DOCTYPE html><html><head>");
-  client.println("<meta charset=UTF-8><meta name=viewport content='width=device-width,initial-scale=1'>");
-  client.println("<title>Config - CCM Relay</title>");
-  client.println("<style>body{font-family:sans-serif;margin:16px;background:#0f1011;color:#f7f8f8}");
-  client.println("h2{color:#5e6ad2}.sec{background:#191a1b;border-radius:6px;padding:12px;margin:8px 0}");
-  client.println("label{display:block;margin:6px 0 2px}");
-  client.println("input[type=text],input[type=number]{width:220px;padding:4px;background:#1a1a1f;color:#eee;border:1px solid #3e3e44;border-radius:3px}");
-  client.println("input[type=submit]{background:#1976d2;color:#fff;border:none;padding:8px 20px;border-radius:4px;cursor:pointer;margin-top:10px}");
-  client.println("a{color:#d0d6e0}.note{color:#8a8f98;font-size:0.85em}</style></head><body>");
+  sendCommonHead(client, "Config - CCM Relay");
+  client.println("<style>label{display:block;margin:6px 0 2px}");
+  client.println("input[type=text],input[type=number]{width:220px;padding:4px;background:#1a1a1f;color:#eee;border:1px solid #3e3e44;border-radius:3px}</style></head><body>");
   client.println("<h2>Network Configuration</h2>");
-  client.printf("<p><a href='/'>Dashboard</a> | <a href='/ccm'>CCM</a> | <a href='/greenhouse'>Greenhouse</a> | <a href='/irrigation'>Irrigation</a> | <a href='/protection'>Protection</a> | <a href='/config'>Network</a> | <a href='/ota'>FW</a></p>\n");
+  client.print(NAV_LINKS); client.println();
   client.println("<form method=POST action=/api/config>");
   client.println("<div class=sec><h3>Identity</h3>");
   client.printf("<label>node_id<input type=text name=node_id value='%s'></label>\n", nodeId.c_str());
@@ -2318,23 +2345,10 @@ void sendConfigPage(WiFiClient& client) {
 // CCM Config Page (GET /ccm)
 // ============================================================
 void sendCcmConfigPage(WiFiClient& client) {
-  client.println("HTTP/1.1 200 OK");
-  client.println("Content-Type: text/html; charset=UTF-8");
-  client.println("Connection: close");
-  client.println();
-  client.println("<!DOCTYPE html><html><head>");
-  client.println("<meta charset=UTF-8><meta name=viewport content='width=device-width,initial-scale=1'>");
-  client.println("<title>CCM Config</title>");
-  client.println("<style>body{font-family:sans-serif;margin:16px;background:#0f1011;color:#f7f8f8}");
-  client.println("h2{color:#5e6ad2}h3{color:#d0d6e0}.sec{background:#191a1b;border-radius:6px;padding:12px;margin:8px 0}");
-  client.println("table{border-collapse:collapse;width:100%}th,td{border:1px solid #2e2e2e;padding:4px 6px}");
-  client.println("th{background:#191a1b;color:#d0d6e0}");
-  client.println("select,input[type=number]{padding:3px;background:#1a1a1f;color:#eee;border:1px solid #3e3e44;border-radius:3px}");
-  client.println("input[type=number]{width:55px}select{width:140px}");
-  client.println("input[type=submit]{background:#1976d2;color:#fff;border:none;padding:8px 20px;border-radius:4px;cursor:pointer;margin-top:10px}");
-  client.println("a{color:#d0d6e0}.note{color:#8a8f98;font-size:0.85em}</style></head><body>");
+  sendCommonHead(client, "CCM Config");
+  client.println("<style>input[type=number]{width:55px}select{width:140px}</style></head><body>");
   client.println("<h2>CCM Channel Mapping</h2>");
-  client.printf("<p><a href='/'>Dashboard</a> | <a href='/ccm'>CCM</a> | <a href='/greenhouse'>Greenhouse</a> | <a href='/irrigation'>Irrigation</a> | <a href='/protection'>Protection</a> | <a href='/config'>Network</a> | <a href='/ota'>FW</a></p>\n");
+  client.print(NAV_LINKS); client.println();
   client.println("<p class=note>Map each relay channel to a UECS-CCM actuator type. Blank = unmapped (inactive).</p>");
   // Bulk Room/Region setter
   client.println("<div class=sec><h3>Bulk Set</h3>");
@@ -2530,24 +2544,10 @@ void handleCcmConfigPost(WiFiClient& client, const String& body) {
 // Greenhouse Control Page (GET /greenhouse)
 // ============================================================
 void sendGreenhousePage(WiFiClient& client) {
-  client.println("HTTP/1.1 200 OK");
-  client.println("Content-Type: text/html");
-  client.println("Connection: close");
-  client.println();
-  client.println("<!DOCTYPE html><html><head>");
-  client.println("<meta charset=UTF-8><meta name=viewport content='width=device-width,initial-scale=1'>");
-  client.println("<title>Greenhouse Control</title>");
-  client.println("<style>body{font-family:sans-serif;margin:16px;background:#0f1011;color:#f7f8f8}");
-  client.println("h2{color:#5e6ad2}h3{color:#d0d6e0}.sec{background:#191a1b;border-radius:6px;padding:12px;margin:8px 0}");
-  client.println("table{border-collapse:collapse;width:100%}th,td{border:1px solid #2e2e2e;padding:4px 6px}");
-  client.println("th{background:#191a1b;color:#d0d6e0}");
-  client.println("select,input[type=number]{padding:3px;background:#1a1a1f;color:#eee;border:1px solid #3e3e44;border-radius:3px}");
-  client.println("input[type=number]{width:60px}select{width:80px}");
-  client.println("input[type=submit]{background:#1976d2;color:#fff;border:none;padding:8px 20px;border-radius:4px;cursor:pointer;margin-top:10px}");
-  client.println("a{color:#d0d6e0}.note{color:#8a8f98;font-size:0.85em}");
-  client.println(".on{color:#66bb6a}.off{color:#ef5350}</style></head><body>");
+  sendCommonHead(client, "Greenhouse Control");
+  client.println("<style>input[type=number]{width:60px}select{width:80px}</style></head><body>");
   client.println("<h2>Greenhouse Control</h2>");
-  client.printf("<p><a href='/'>Dashboard</a> | <a href='/ccm'>CCM</a> | <a href='/greenhouse'>Greenhouse</a> | <a href='/irrigation'>Irrigation</a> | <a href='/protection'>Protection</a> | <a href='/config'>Network</a> | <a href='/ota'>FW</a></p>\n");
+  client.print(NAV_LINKS); client.println();
   client.println("<p class=note>Temperature-based proportional relay control. CCM commands take priority when active.</p>");
   client.println("<div class=sec id=ghstat>Loading...</div>");
   client.println("<div class=sec id=ghrun>Loading...</div>");
@@ -2660,26 +2660,12 @@ void handleGreenhousePost(WiFiClient& client, const String& body) {
 // Solar Irrigation Page (GET /irrigation)
 // ============================================================
 void sendIrrigationPage(WiFiClient& client) {
-  client.println("HTTP/1.1 200 OK");
-  client.println("Content-Type: text/html");
-  client.println("Connection: close");
-  client.println();
-  client.println("<!DOCTYPE html><html><head>");
-  client.println("<meta charset=UTF-8><meta name=viewport content='width=device-width,initial-scale=1'>");
-  client.println("<title>Solar Irrigation</title>");
-  client.println("<style>body{font-family:sans-serif;margin:16px;background:#0f1011;color:#f7f8f8}");
-  client.println("h2{color:#5e6ad2}h3{color:#d0d6e0}.sec{background:#191a1b;border-radius:6px;padding:12px;margin:8px 0}");
-  client.println("table{border-collapse:collapse;width:100%}th,td{border:1px solid #2e2e2e;padding:4px 6px}");
-  client.println("th{background:#191a1b;color:#d0d6e0}");
-  client.println("select,input[type=number]{padding:3px;background:#1a1a1f;color:#eee;border:1px solid #3e3e44;border-radius:3px}");
-  client.println("input[type=number]{width:70px}select{width:80px}");
-  client.println("input[type=submit]{background:#1976d2;color:#fff;border:none;padding:8px 20px;border-radius:4px;cursor:pointer;margin-top:10px}");
-  client.println("a{color:#d0d6e0}.note{color:#8a8f98;font-size:0.85em}");
-  client.println(".on{color:#66bb6a}.off{color:#ef5350}");
+  sendCommonHead(client, "Solar Irrigation");
+  client.println("<style>input[type=number]{width:70px}select{width:80px}");
   client.println(".bar{background:#2e2e2e;border-radius:3px;height:18px;width:120px;display:inline-block;vertical-align:middle}");
   client.println(".fill{height:100%;border-radius:3px}</style></head><body>");
   client.println("<h2>Solar Irrigation</h2>");
-  client.printf("<p><a href='/'>Dashboard</a> | <a href='/ccm'>CCM</a> | <a href='/greenhouse'>Greenhouse</a> | <a href='/irrigation'>Irrigation</a> | <a href='/protection'>Protection</a> | <a href='/config'>Network</a> | <a href='/ota'>FW</a></p>\n");
+  client.print(NAV_LINKS); client.println();
   client.println("<p class=note>Accumulated solar radiation triggers irrigation. Requires ADS1110 + PVSS-03 on I2C Grove.</p>");
   client.println("<div class=sec id=solstat>Loading...</div>");
   client.println("<div class=sec id=irrirun>Loading...</div>");
@@ -2871,25 +2857,12 @@ void handleIrrigationPost(WiFiClient& client, const String& body) {
 // Protection Page (GET /protection) — Dew + Rate Guard
 // ============================================================
 void sendProtectionPage(WiFiClient& client) {
-  client.println("HTTP/1.1 200 OK");
-  client.println("Content-Type: text/html");
-  client.println("Connection: close");
-  client.println();
-  client.println("<!DOCTYPE html><html><head>");
-  client.println("<meta charset=UTF-8><meta name=viewport content='width=device-width,initial-scale=1'>");
-  client.println("<title>Protection</title>");
-  client.println("<style>body{font-family:sans-serif;margin:16px;background:#0f1011;color:#f7f8f8}");
-  client.println("h2{color:#5e6ad2}h3{color:#d0d6e0}.sec{background:#191a1b;border-radius:6px;padding:12px;margin:8px 0}");
-  client.println("table{border-collapse:collapse;width:100%}th,td{border:1px solid #2e2e2e;padding:4px 6px}");
-  client.println("th{background:#191a1b;color:#d0d6e0}");
-  client.println("select,input[type=number]{padding:3px;background:#1a1a1f;color:#eee;border:1px solid #3e3e44;border-radius:3px}");
-  client.println("input[type=number]{width:70px}select{width:80px}");
-  client.println("input[type=submit]{background:#1976d2;color:#fff;border:none;padding:8px 20px;border-radius:4px;cursor:pointer;margin-top:10px}");
-  client.println("a{color:#d0d6e0}.note{color:#8a8f98;font-size:0.85em}");
-  client.println(".on{color:#66bb6a}.off{color:#ef5350}fieldset{border:1px solid #3e3e44;border-radius:6px;padding:12px;margin:12px 0}");
+  sendCommonHead(client, "Protection");
+  client.println("<style>input[type=number]{width:70px}select{width:80px}");
+  client.println("fieldset{border:1px solid #3e3e44;border-radius:6px;padding:12px;margin:12px 0}");
   client.println("legend{color:#5e6ad2;font-weight:bold}</style></head><body>");
   client.println("<h2>Protection</h2>");
-  client.printf("<p><a href='/'>Dashboard</a> | <a href='/ccm'>CCM</a> | <a href='/greenhouse'>Greenhouse</a> | <a href='/irrigation'>Irrigation</a> | <a href='/protection'>Protection</a> | <a href='/config'>Network</a> | <a href='/ota'>FW</a></p>\n");
+  client.print(NAV_LINKS); client.println();
   client.println("<div class=sec id=pstat>Loading...</div>");
 
   // Dew Prevention form
@@ -3047,16 +3020,8 @@ void handleProtectionPost(WiFiClient& client, const String& body) {
 // OTA Firmware Update Page (GET /ota)
 // ============================================================
 void sendOTAPage(WiFiClient& client) {
-  client.println("HTTP/1.1 200 OK");
-  client.println("Content-Type: text/html");
-  client.println("Connection: close");
-  client.println();
-  client.println("<!DOCTYPE html><html><head>");
-  client.println("<meta charset=UTF-8><meta name=viewport content='width=device-width,initial-scale=1'>");
-  client.println("<title>Firmware Update</title>");
-  client.println("<style>body{font-family:sans-serif;margin:16px;background:#0f1011;color:#f7f8f8}");
-  client.println("h2{color:#5e6ad2}.sec{background:#191a1b;border-radius:6px;padding:16px;margin:8px 0}");
-  client.println("a{color:#d0d6e0}.note{color:#8a8f98;font-size:0.85em}");
+  sendCommonHead(client, "Firmware Update");
+  client.println("<style>.sec{padding:16px}");
   client.println("#prog{width:100%;height:24px;background:#2e2e2e;border-radius:4px;margin:10px 0;display:none}");
   client.println("#progBar{height:100%;background:#1976d2;border-radius:4px;width:0%;transition:width 0.3s}");
   client.println("#msg{margin:10px 0;font-weight:bold}");
@@ -3064,7 +3029,7 @@ void sendOTAPage(WiFiClient& client) {
   client.println("button{background:#1976d2;color:#fff;border:none;padding:8px 20px;border-radius:4px;cursor:pointer}");
   client.println("button:disabled{background:#555}</style></head><body>");
   client.println("<h2>Firmware Update</h2>");
-  client.printf("<p><a href='/'>Dashboard</a> | <a href='/ccm'>CCM</a> | <a href='/greenhouse'>Greenhouse</a> | <a href='/irrigation'>Irrigation</a> | <a href='/protection'>Protection</a> | <a href='/config'>Network</a> | <a href='/ota'>FW</a></p>\n");
+  client.print(NAV_LINKS); client.println();
   client.printf("<div class=sec><p>Current: <b>%s</b> v%s</p>\n", FW_NAME, FW_VERSION);
   client.println("<p class=note>Select a .bin firmware file compiled with arduino-cli.</p>");
   client.println("<input type=file id=fw accept='.bin'><br>");
