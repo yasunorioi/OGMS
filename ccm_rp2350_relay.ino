@@ -114,6 +114,14 @@ CcmMapping ccmMap[8];
 
 // ========== Greenhouse Local Control ==========
 // 温度ベース比例制御。CCM受信優先 → 途絶時ローカルフォールバック
+
+// 温度→開度カーブポイント（テーブル方式）
+struct TempCurvePoint {
+  float temp;   // 温度 (℃)
+  float pct;    // 開度% (0-100)
+};
+const int MAX_CURVE_POINTS = 5;
+
 struct GreenhouseCtrl {
   bool   enabled;        // ローカル制御有効
   int    ch;             // 制御対象リレーch (0-7, -1=none)
@@ -121,6 +129,11 @@ struct GreenhouseCtrl {
   float  temp_full;      // 全開温度 (この温度でデューティ100%)
   int    cycle_sec;      // 制御周期 秒 (e.g. 60 = 30sON+30sOFF at 50%)
   int    sensor_src;     // 0=SHT40, 1=DS18B20
+  // Feature 2: 温度カーブ選択
+  int    curve_mode;          // 0=linear, 1=table, 2=sigmoid, 3=exponential
+  TempCurvePoint curve_points[MAX_CURVE_POINTS];
+  int    curve_point_count;   // テーブルポイント数 (3-5)
+  float  curve_coeff;         // sigmoid/exponential係数 (default 1.0)
 };
 
 const int GH_CTRL_SLOTS = 4;  // 最大4ルール
@@ -246,6 +259,38 @@ struct CO2GuardRuntime {
 };
 CO2GuardRuntime co2Run = {};
 
+// ========== Aperture (Side Window) Control ==========
+// 開度テーブルに基づく側窓開閉時間管理
+struct ApertureSegment {
+  float from_pct;    // 開始開度%
+  float to_pct;      // 終了開度%
+  int   seconds;     // この区間の所要秒数
+};
+const int MAX_APT_SEGMENTS = 5;
+
+struct ApertureConfig {
+  bool  enabled;           // 開度管理有効
+  int   ch;                // 開方向リレーch (0-7)
+  int   close_ch;          // 閉方向リレーch (-1=開chのOFF=閉)
+  int   limit_di;          // リミットSW DIch (-1=無効)
+  int   segment_count;     // 使用区間数 (2-5)
+  ApertureSegment segments[MAX_APT_SEGMENTS];
+};
+const int APT_SLOTS = 4;
+
+struct ApertureRuntime {
+  float current_pct;         // 現在開度% (0-100)
+  float target_pct;          // 目標開度% (0-100)
+  bool  moving;              // 動作中
+  bool  opening;             // true=開, false=閉
+  unsigned long move_start;  // 動作開始時刻 (millis)
+  int   move_duration_ms;    // 計算済み動作時間 (ms)
+  bool  initializing;        // 起動初期化中（全閉動作中）
+};
+
+ApertureConfig  aptCtrl[APT_SLOTS];
+ApertureRuntime aptRun[APT_SLOTS];
+
 // ========== Timing ==========
 const int           SENSOR_INTERVAL      = 10;
 const int           ETH_CONNECT_TIMEOUT  = 15;
@@ -266,7 +311,8 @@ enum RelayOwner : uint8_t {
   OWN_CO2      = 4,  // CO2ガード
   OWN_CCM      = 5,  // CCM受信
   OWN_MANUAL   = 6,  // WebUI手動 / DI連動
-  OWN_COUNT    = 7
+  OWN_APT      = 7,  // 開度（側窓）制御
+  OWN_COUNT    = 8
 };
 uint8_t relayClaims[8]     = {0};  // ビットマスク: bit N = OWN_xxx が ON 要求中
 uint8_t relayInterested[8] = {0};  // ビットマスク: bit N = OWN_xxx がこのchに関与したことがある
@@ -388,6 +434,7 @@ void saveGreenhouseConfig();
 void greenhouseControl(unsigned long now);
 void sendGreenhousePage(WiFiClient& client);
 void handleGreenhousePost(WiFiClient& client, const String& body);
+void handleAperturePost(WiFiClient& client, const String& body);
 void loadIrrigationConfig();
 void saveIrrigationConfig();
 void irrigationControl(unsigned long now);
@@ -406,6 +453,11 @@ void saveRateGuardConfig();
 void tempRateGuardControl(unsigned long now);
 void sendProtectionPage(WiFiClient& client);
 void handleProtectionPost(WiFiClient& client, const String& body);
+void loadApertureConfig();
+void saveApertureConfig();
+float calcMoveDuration(int slot, float from_pct, float to_pct);
+void setTargetAperture(int slot, float target_pct);
+void apertureControl(unsigned long now);
 
 // ============================================================
 // DI Interrupt
@@ -1127,6 +1179,188 @@ void saveCcmMapping() {
 }
 
 // ============================================================
+// Aperture (Side Window) Control — Config & Logic
+// ============================================================
+void loadApertureConfig() {
+  for (int i = 0; i < APT_SLOTS; i++) {
+    aptCtrl[i].enabled       = false;
+    aptCtrl[i].ch            = -1;
+    aptCtrl[i].close_ch      = -1;
+    aptCtrl[i].limit_di      = -1;
+    aptCtrl[i].segment_count = 2;
+    aptCtrl[i].segments[0]   = {0.0, 50.0, 30};
+    aptCtrl[i].segments[1]   = {50.0, 100.0, 30};
+    for (int j = 2; j < MAX_APT_SEGMENTS; j++) aptCtrl[i].segments[j] = {0, 0, 0};
+    aptRun[i] = {0.0, 0.0, false, false, 0, 0, false};
+  }
+  if (!LittleFS.exists("/aperture.json")) return;
+  File f = LittleFS.open("/aperture.json", "r");
+  if (!f) return;
+  JsonDocument doc;
+  if (deserializeJson(doc, f)) { f.close(); return; }
+  f.close();
+  JsonArray arr = doc["slots"].as<JsonArray>();
+  int idx = 0;
+  for (JsonObject s : arr) {
+    if (idx >= APT_SLOTS) break;
+    aptCtrl[idx].enabled       = s["enabled"] | false;
+    aptCtrl[idx].ch            = s["ch"]       | -1;
+    aptCtrl[idx].close_ch      = s["close_ch"] | -1;
+    aptCtrl[idx].limit_di      = s["limit_di"] | -1;
+    aptCtrl[idx].segment_count = constrain((int)(s["seg_count"] | 2), 2, MAX_APT_SEGMENTS);
+    JsonArray segs = s["segments"].as<JsonArray>();
+    int si = 0;
+    for (JsonObject sg : segs) {
+      if (si >= MAX_APT_SEGMENTS) break;
+      aptCtrl[idx].segments[si].from_pct = sg["from"] | 0.0;
+      aptCtrl[idx].segments[si].to_pct   = sg["to"]   | 0.0;
+      aptCtrl[idx].segments[si].seconds  = sg["sec"]  | 0;
+      si++;
+    }
+    idx++;
+  }
+}
+
+void saveApertureConfig() {
+  JsonDocument doc;
+  JsonArray arr = doc["slots"].to<JsonArray>();
+  for (int i = 0; i < APT_SLOTS; i++) {
+    JsonObject s = arr.add<JsonObject>();
+    s["enabled"]   = aptCtrl[i].enabled;
+    s["ch"]        = aptCtrl[i].ch;
+    s["close_ch"]  = aptCtrl[i].close_ch;
+    s["limit_di"]  = aptCtrl[i].limit_di;
+    s["seg_count"] = aptCtrl[i].segment_count;
+    JsonArray segs = s["segments"].to<JsonArray>();
+    for (int j = 0; j < aptCtrl[i].segment_count; j++) {
+      JsonObject sg = segs.add<JsonObject>();
+      sg["from"] = aptCtrl[i].segments[j].from_pct;
+      sg["to"]   = aptCtrl[i].segments[j].to_pct;
+      sg["sec"]  = aptCtrl[i].segments[j].seconds;
+    }
+  }
+  File f = LittleFS.open("/aperture.json", "w");
+  if (!f) return;
+  serializeJson(doc, f);
+  f.close();
+}
+
+// 開度fromからtoへの所要時間(ms)を区間テーブルから計算
+float calcMoveDuration(int slot, float from_pct, float to_pct) {
+  if (slot < 0 || slot >= APT_SLOTS) return 0;
+  float dist = fabsf(to_pct - from_pct);
+  if (dist < 0.1) return 0;
+  float total_ms = 0;
+  float lo = min(from_pct, to_pct);
+  float hi = max(from_pct, to_pct);
+  for (int j = 0; j < aptCtrl[slot].segment_count; j++) {
+    float seg_lo = aptCtrl[slot].segments[j].from_pct;
+    float seg_hi = aptCtrl[slot].segments[j].to_pct;
+    if (seg_lo > seg_hi) { float tmp = seg_lo; seg_lo = seg_hi; seg_hi = tmp; }
+    float overlap_lo = max(lo, seg_lo);
+    float overlap_hi = min(hi, seg_hi);
+    if (overlap_hi <= overlap_lo) continue;
+    float seg_span = seg_hi - seg_lo;
+    if (seg_span < 0.1) continue;
+    float frac = (overlap_hi - overlap_lo) / seg_span;
+    total_ms += frac * aptCtrl[slot].segments[j].seconds * 1000.0;
+  }
+  return total_ms;
+}
+
+void setTargetAperture(int slot, float target_pct) {
+  if (slot < 0 || slot >= APT_SLOTS) return;
+  if (!aptCtrl[slot].enabled || aptCtrl[slot].ch < 0) return;
+  target_pct = constrain(target_pct, 0.0, 100.0);
+  aptRun[slot].target_pct = target_pct;
+  float from = aptRun[slot].current_pct;
+  if (fabsf(target_pct - from) < 0.5) return;
+  float dur_ms = calcMoveDuration(slot, from, target_pct);
+  if (dur_ms <= 0) return;
+  // 動作中なら一旦停止
+  if (aptRun[slot].moving) {
+    releaseRelay(aptCtrl[slot].ch + 1, OWN_APT);
+    if (aptCtrl[slot].close_ch >= 0) releaseRelay(aptCtrl[slot].close_ch + 1, OWN_APT);
+  }
+  aptRun[slot].moving = true;
+  aptRun[slot].opening = (target_pct > from);
+  aptRun[slot].move_start = millis();
+  aptRun[slot].move_duration_ms = (int)dur_ms;
+  if (aptRun[slot].opening) {
+    claimRelay(aptCtrl[slot].ch + 1, OWN_APT);
+    if (aptCtrl[slot].close_ch >= 0) releaseRelay(aptCtrl[slot].close_ch + 1, OWN_APT);
+  } else {
+    if (aptCtrl[slot].close_ch >= 0) {
+      claimRelay(aptCtrl[slot].close_ch + 1, OWN_APT);
+      releaseRelay(aptCtrl[slot].ch + 1, OWN_APT);
+    } else {
+      releaseRelay(aptCtrl[slot].ch + 1, OWN_APT);
+    }
+  }
+}
+
+void apertureControl(unsigned long now) {
+  bool diNow[8] = {false};
+  for (int i = 0; i < 8; i++) diNow[i] = diState[i];
+
+  for (int i = 0; i < APT_SLOTS; i++) {
+    if (!aptCtrl[i].enabled || aptCtrl[i].ch < 0) continue;
+
+    // リミットSW検知（閉じ動作中 or initializing中）
+    if (aptCtrl[i].limit_di >= 0 && aptCtrl[i].limit_di < 8) {
+      bool limitHit = diNow[aptCtrl[i].limit_di];
+      if (limitHit && (!aptRun[i].opening || aptRun[i].initializing)) {
+        // 全閉確定
+        aptRun[i].current_pct = 0.0;
+        aptRun[i].moving = false;
+        aptRun[i].initializing = false;
+        releaseRelay(aptCtrl[i].ch + 1, OWN_APT);
+        if (aptCtrl[i].close_ch >= 0) releaseRelay(aptCtrl[i].close_ch + 1, OWN_APT);
+        continue;
+      }
+    }
+
+    if (aptRun[i].initializing) {
+      // 初期化中: 全閉方向に動作
+      if (!aptRun[i].moving) {
+        float dur_ms = calcMoveDuration(i, aptRun[i].current_pct, 0.0);
+        if (dur_ms < 100) dur_ms = aptCtrl[i].segments[0].seconds * 1000.0 * 2;
+        aptRun[i].moving = true;
+        aptRun[i].opening = false;
+        aptRun[i].move_start = now;
+        aptRun[i].move_duration_ms = (int)dur_ms + 2000;  // +2s マージン
+        if (aptCtrl[i].close_ch >= 0) {
+          claimRelay(aptCtrl[i].close_ch + 1, OWN_APT);
+          releaseRelay(aptCtrl[i].ch + 1, OWN_APT);
+        } else {
+          releaseRelay(aptCtrl[i].ch + 1, OWN_APT);
+        }
+      }
+      // タイムアウトで強制全閉扱い
+      if ((long)(now - aptRun[i].move_start) >= aptRun[i].move_duration_ms) {
+        aptRun[i].current_pct = 0.0;
+        aptRun[i].moving = false;
+        aptRun[i].initializing = false;
+        releaseRelay(aptCtrl[i].ch + 1, OWN_APT);
+        if (aptCtrl[i].close_ch >= 0) releaseRelay(aptCtrl[i].close_ch + 1, OWN_APT);
+      }
+      continue;
+    }
+
+    // 通常動作: 動作完了チェック
+    if (aptRun[i].moving) {
+      if ((long)(now - aptRun[i].move_start) >= aptRun[i].move_duration_ms) {
+        aptRun[i].current_pct = aptRun[i].target_pct;
+        aptRun[i].moving = false;
+        releaseRelay(aptCtrl[i].ch + 1, OWN_APT);
+        if (aptCtrl[i].close_ch >= 0) releaseRelay(aptCtrl[i].close_ch + 1, OWN_APT);
+        Serial.printf("[APT] slot%d done: %.0f%%\n", i + 1, aptRun[i].current_pct);
+      }
+    }
+  }
+}
+
+// ============================================================
 // Greenhouse Local Control — Config & Logic
 // ============================================================
 void loadGreenhouseConfig() {
@@ -1155,6 +1389,17 @@ void loadGreenhouseConfig() {
     ghCtrl[idx].temp_full  = r["temp_full"]  | 30.0;
     ghCtrl[idx].cycle_sec  = r["cycle_sec"]  | 60;
     ghCtrl[idx].sensor_src = r["sensor_src"] | 0;
+    ghCtrl[idx].curve_mode        = r["curve_mode"]        | 0;
+    ghCtrl[idx].curve_coeff       = r["curve_coeff"]       | 1.0;
+    ghCtrl[idx].curve_point_count = constrain((int)(r["curve_point_count"] | 3), 2, MAX_CURVE_POINTS);
+    JsonArray pts = r["curve_points"].as<JsonArray>();
+    int pi = 0;
+    for (JsonObject p : pts) {
+      if (pi >= MAX_CURVE_POINTS) break;
+      ghCtrl[idx].curve_points[pi].temp = p["temp"] | 25.0;
+      ghCtrl[idx].curve_points[pi].pct  = p["pct"]  | 0.0;
+      pi++;
+    }
     idx++;
   }
   Serial.printf("Greenhouse: %d rules loaded\n", idx);
@@ -1171,6 +1416,15 @@ void saveGreenhouseConfig() {
     r["temp_full"]  = ghCtrl[i].temp_full;
     r["cycle_sec"]  = ghCtrl[i].cycle_sec;
     r["sensor_src"] = ghCtrl[i].sensor_src;
+    r["curve_mode"]        = ghCtrl[i].curve_mode;
+    r["curve_coeff"]       = ghCtrl[i].curve_coeff;
+    r["curve_point_count"] = ghCtrl[i].curve_point_count;
+    JsonArray pts = r["curve_points"].to<JsonArray>();
+    for (int j = 0; j < ghCtrl[i].curve_point_count; j++) {
+      JsonObject p = pts.add<JsonObject>();
+      p["temp"] = ghCtrl[i].curve_points[j].temp;
+      p["pct"]  = ghCtrl[i].curve_points[j].pct;
+    }
   }
   File f = LittleFS.open("/gh_ctrl.json", "w");
   if (!f) return;
@@ -1201,12 +1455,57 @@ void greenhouseControl(unsigned long now) {
 
     ghRun[i].lastTemp = temp;
 
-    // デューティ比計算 (比例制御)
+    // デューティ比計算 (カーブ選択式)
     float duty = 0.0;
-    if (temp >= ghCtrl[i].temp_full) {
+    float t_lo = ghCtrl[i].temp_open;
+    float t_hi = ghCtrl[i].temp_full;
+    if (temp >= t_hi) {
       duty = 1.0;
-    } else if (temp > ghCtrl[i].temp_open) {
-      duty = (temp - ghCtrl[i].temp_open) / (ghCtrl[i].temp_full - ghCtrl[i].temp_open);
+    } else if (temp > t_lo) {
+      float t_norm = (t_hi > t_lo) ? (temp - t_lo) / (t_hi - t_lo) : 0.0;
+      switch (ghCtrl[i].curve_mode) {
+        case 1: { // Table interpolation
+          float d = 0.0;
+          int cnt = ghCtrl[i].curve_point_count;
+          if (cnt >= 2) {
+            // curve_points は temp昇順を前提
+            if (temp <= ghCtrl[i].curve_points[0].temp) {
+              d = ghCtrl[i].curve_points[0].pct / 100.0;
+            } else if (temp >= ghCtrl[i].curve_points[cnt-1].temp) {
+              d = ghCtrl[i].curve_points[cnt-1].pct / 100.0;
+            } else {
+              for (int p = 0; p < cnt - 1; p++) {
+                float p0t = ghCtrl[i].curve_points[p].temp;
+                float p1t = ghCtrl[i].curve_points[p+1].temp;
+                if (temp >= p0t && temp < p1t) {
+                  float frac = (p1t > p0t) ? (temp - p0t) / (p1t - p0t) : 0.0;
+                  d = (ghCtrl[i].curve_points[p].pct + frac * (ghCtrl[i].curve_points[p+1].pct - ghCtrl[i].curve_points[p].pct)) / 100.0;
+                  break;
+                }
+              }
+            }
+          }
+          duty = constrain(d, 0.0, 1.0);
+          break;
+        }
+        case 2: { // Sigmoid
+          float k = ghCtrl[i].curve_coeff;
+          float midpoint = (t_lo + t_hi) / 2.0;
+          duty = 1.0 / (1.0 + expf(-k * (temp - midpoint)));
+          duty = constrain(duty, 0.0, 1.0);
+          break;
+        }
+        case 3: { // Exponential
+          float k = ghCtrl[i].curve_coeff;
+          float denom = expf(k) - 1.0;
+          duty = (denom > 0.001) ? (expf(k * t_norm) - 1.0) / denom : t_norm;
+          duty = constrain(duty, 0.0, 1.0);
+          break;
+        }
+        default: // Linear (0)
+          duty = t_norm;
+          break;
+      }
     }
     ghRun[i].duty = duty;
 
@@ -1955,6 +2254,8 @@ void handleWebClient() {
     sendGreenhousePage(client);
   } else if (method == "POST" && path == "/api/greenhouse") {
     handleGreenhousePost(client, body);
+  } else if (method == "POST" && path == "/api/aperture") {
+    handleAperturePost(client, body);
   } else if (method == "GET" && path == "/irrigation") {
     sendIrrigationPage(client);
   } else if (method == "POST" && path == "/api/irrigation") {
@@ -2015,6 +2316,10 @@ void setup() {
   loadConfig();
   loadCcmMapping();
   loadGreenhouseConfig();
+  loadApertureConfig();
+  for (int i = 0; i < APT_SLOTS; i++) {
+    if (aptCtrl[i].enabled) aptRun[i].initializing = true;
+  }
   loadIrrigationConfig();
   loadCO2GuardConfig();
   loadDewConfig();
@@ -2155,6 +2460,9 @@ void loop() {
     Serial.printf("[%d] relay=0x%02X epoch=%lu uptime=%lus\n",
                   loopCount, relayState, getCurrentEpoch(), millis() / 1000);
   }
+
+  // Aperture (side window) control
+  apertureControl(now);
 
   // Greenhouse local control (every loop for duty cycle switching)
   greenhouseControl(now);

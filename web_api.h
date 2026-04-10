@@ -91,8 +91,30 @@ void sendAPIState(WiFiClient& client) {
     g["sensor"]   = ghCtrl[i].sensor_src == 0 ? "SHT40" : "DS18B20";
     if (!isnan(ghRun[i].lastTemp)) g["temp"] = round(ghRun[i].lastTemp * 10) / 10.0;
     else g["temp"] = nullptr;
-    g["duty"]     = round(ghRun[i].duty * 100);
-    g["active"]   = ghRun[i].active;
+    g["duty"]       = round(ghRun[i].duty * 100);
+    g["active"]     = ghRun[i].active;
+    g["curve_mode"] = ghCtrl[i].curve_mode;
+    g["curve_coeff"] = ghCtrl[i].curve_coeff;
+  }
+
+  // Aperture (side window) status
+  JsonArray aptArr = doc["aperture"].to<JsonArray>();
+  for (int i = 0; i < APT_SLOTS; i++) {
+    JsonObject a = aptArr.add<JsonObject>();
+    a["enabled"]     = aptCtrl[i].enabled;
+    a["ch"]          = aptCtrl[i].ch;
+    a["current_pct"] = round(aptRun[i].current_pct * 10) / 10.0;
+    a["target_pct"]  = round(aptRun[i].target_pct * 10) / 10.0;
+    a["moving"]      = aptRun[i].moving;
+    a["initializing"] = aptRun[i].initializing;
+    a["seg_count"]   = aptCtrl[i].segment_count;
+    JsonArray segs = a["segments"].to<JsonArray>();
+    for (int j = 0; j < aptCtrl[i].segment_count; j++) {
+      JsonObject sg = segs.add<JsonObject>();
+      sg["from"] = aptCtrl[i].segments[j].from_pct;
+      sg["to"]   = aptCtrl[i].segments[j].to_pct;
+      sg["sec"]  = aptCtrl[i].segments[j].seconds;
+    }
   }
 
   // Irrigation control status
