@@ -5,7 +5,7 @@
 // ============================================================
 void sendCcmConfigPage(WiFiClient& client) {
   sendCommonHead(client, L("CCM Config", "CCM設定"));
-  client.println("<style>input[type=number]{width:55px}select{width:140px}</style></head><body>");
+  client.println("<style>input[type=number]{width:60px}select{width:140px}</style></head><body>");
   client.printf("<h2>%s</h2>\n", L("CCM Channel Mapping", "CCMチャンネル割当"));
   printNavLinks(client);
   client.printf("<p class=note>%s</p>\n", L("Map each relay channel to a UECS-CCM actuator type. Blank = unmapped (inactive).",
@@ -38,12 +38,12 @@ void sendCcmConfigPage(WiFiClient& client) {
     client.printf("<td><input type=number name=wdt%d value=%d min=0 max=3600></td>", i, ccmMap[i].watchdog_sec);
     // DI Link dropdown: -1=none, 0-7=DI1-8, + invert checkbox
     client.printf("<td><select name=dil%d>", i);
-    client.printf("<option value=-1%s>none</option>", ccmMap[i].di_link < 0 ? " selected" : "");
+    client.printf("<option value=-1%s>(none)</option>", ccmMap[i].di_link < 0 ? " selected" : "");
     for (int d = 0; d < 8; d++) {
       client.printf("<option value=%d%s>DI%d</option>", d, ccmMap[i].di_link == d ? " selected" : "", d + 1);
     }
-    client.printf("</select> <label><input type=checkbox name=dii%d value=1%s>inv</label></td></tr>",
-                  i, ccmMap[i].di_invert ? " checked" : "");
+    client.printf("</select> <label><input type=checkbox name=dii%d aria-label='Invert DI %d' value=1%s>inv</label></td></tr>",
+                  i, i + 1, ccmMap[i].di_invert ? " checked" : "");
   }
 
   client.println("</table>");

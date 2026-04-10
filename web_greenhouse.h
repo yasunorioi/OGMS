@@ -11,8 +11,8 @@ void sendGreenhousePage(WiFiClient& client) {
   printNavLinks(client);
   client.printf("<p class=note>%s</p>\n", L("Temperature-based proportional relay control. CCM commands take priority when active.",
     "温度比例リレー制御。CCMコマンドが有効な場合はCCMが優先されます。"));
-  client.println("<div class=sec id=ghstat>Loading...</div>");
-  client.println("<div class=sec id=ghrun>Loading...</div>");
+  client.printf("<div class=sec id=ghstat>%s</div>\n", L("Loading...","読み込み中..."));
+  client.printf("<div class=sec id=ghrun>%s</div>\n", L("Loading...","読み込み中..."));
 
   // === Greenhouse Config form ===
   client.printf("<div class=sec><h3>%s</h3>\n", L("Greenhouse Rules", "温室制御ルール"));
@@ -31,8 +31,8 @@ void sendGreenhousePage(WiFiClient& client) {
     client.printf("<option value=0%s>SHT40</option>", ghCtrl[i].sensor_src == 0 ? " selected" : "");
     client.printf("<option value=1%s>DS18B20</option>", ghCtrl[i].sensor_src == 1 ? " selected" : "");
     client.printf("</select><br>");
-    client.printf("<label title='Relay starts opening at this temp'>Open(C):<input type=number name=to%d value=%.1f min=-10 max=60 step=0.5></label> ", i, ghCtrl[i].temp_open);
-    client.printf("<label title='100%% duty at this temp'>Full(C):<input type=number name=tf%d value=%.1f min=-10 max=60 step=0.5></label> ", i, ghCtrl[i].temp_full);
+    client.printf("<label>Open(C):<input type=number name=to%d value=%.1f min=-10 max=60 step=0.5></label> ", i, ghCtrl[i].temp_open);
+    client.printf("<label>Full(C):<input type=number name=tf%d value=%.1f min=-10 max=60 step=0.5></label> ", i, ghCtrl[i].temp_full);
     client.printf("<label>Cycle(s):<input type=number name=cy%d value=%d min=10 max=600></label><br>", i, ghCtrl[i].cycle_sec);
     // Curve mode
     client.printf("Curve:<select name=cm%d id=cm%d onchange=\"showCurve(%d,this.value)\">", i, i, i);
@@ -118,7 +118,7 @@ void sendGreenhousePage(WiFiClient& client) {
   client.println("var tf=form.querySelector('[name=tf'+i+']');");
   client.println("var en=form.querySelector('[name=en'+i+']');");
   client.println("if(en&&en.checked&&to&&tf&&parseFloat(to.value)>=parseFloat(tf.value)){");
-  client.println("alert('Rule '+(i+1)+': Open temp must be less than Full temp');");
+  client.println("alert('Rule '+(i+1)+': '+(LANG==='jp'?'開放温度は全開温度より低く設定してください':'Open temp must be less than Full temp'));");
   client.println("return false;}}");
   client.println("return submitForm(form,btn);}");
   // ghLoad: runtime display with aperture%

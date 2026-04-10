@@ -5,15 +5,15 @@
 // ============================================================
 void sendIrrigationPage(WiFiClient& client) {
   sendCommonHead(client, L("Solar Irrigation", "日射灌水"));
-  client.println("<style>input[type=number]{width:70px}select{width:80px}");
+  client.println("<style>input[type=number]{width:60px}select{width:80px}");
   client.println(".bar{background:#2e2e2e;border-radius:3px;height:18px;width:120px;display:inline-block;vertical-align:middle}");
   client.println(".fill{height:100%;border-radius:3px}</style></head><body>");
   client.printf("<h2>%s</h2>\n", L("Solar Irrigation", "日射灌水"));
   printNavLinks(client);
   client.printf("<p class=note>%s</p>\n", L("Accumulated solar radiation triggers irrigation. Requires ADS1110 + PVSS-03 on I2C Grove.",
     "積算日射量で灌水をトリガーします。I2C GroveにADS1110+PVSS-03が必要。"));
-  client.println("<div class=sec id=solstat>Loading...</div>");
-  client.println("<div class=sec id=irrirun>Loading...</div>");
+  client.printf("<div class=sec id=solstat>%s</div>\n", L("Loading...","読み込み中..."));
+  client.printf("<div class=sec id=irrirun>%s</div>\n", L("Loading...","読み込み中..."));
 
   // Config form
   client.printf("<h3>%s</h3>\n", L("Settings","設定"));
@@ -37,7 +37,7 @@ void sendIrrigationPage(WiFiClient& client) {
   }
   client.println("</table>");
 
-  client.printf("<h4>%s</h4>\n", L("Timer Mode (mode=0)", "タイマーモード (mode=0)"));
+  client.printf("<h3>%s</h3>\n", L("Timer Mode (mode=0)", "タイマーモード (mode=0)"));
   client.printf("<table><tr><th>%s</th><th>%s</th><th>%s</th></tr>\n",
     L("Rule","ルール"), L("Duration(s)","継続時間(s)"), L("Drain Stop(s)","排液停止(s)"));
   for (int i = 0; i < IRRI_SLOTS; i++) {
@@ -47,7 +47,7 @@ void sendIrrigationPage(WiFiClient& client) {
   }
   client.println("</table>");
 
-  client.printf("<h4>%s</h4>\n", L("Duty Mode (mode=1)", "デューティモード (mode=1)"));
+  client.printf("<h3>%s</h3>\n", L("Duty Mode (mode=1)", "デューティモード (mode=1)"));
   client.printf("<table><tr><th>%s</th><th>%s</th><th>Init%%</th><th>Min%%</th><th>Max%%</th><th>Step%%</th><th>%s</th><th>%s</th></tr>\n",
     L("Rule","ルール"), L("Cycle(s)","周期(s)"), L("Drain Lo%","排液Lo%"), L("Drain Hi%","排液Hi%"));
   for (int i = 0; i < IRRI_SLOTS; i++) {
@@ -62,7 +62,7 @@ void sendIrrigationPage(WiFiClient& client) {
   }
   client.println("</table>");
 
-  client.printf("<h4>%s</h4>\n", L("Sensor Calibration", "センサーキャリブレーション"));
+  client.printf("<h3>%s</h3>\n", L("Sensor Calibration", "センサーキャリブレーション"));
   client.printf("<table><tr><th>%s</th><th>Flow DI</th><th>mL/pulse</th><th>Drain mL/tip</th></tr>\n", L("Rule","ルール"));
   for (int i = 0; i < IRRI_SLOTS; i++) {
     client.printf("<tr><td>%d</td>", i + 1);
@@ -98,8 +98,8 @@ void sendIrrigationPage(WiFiClient& client) {
   client.println("var du=form.querySelector('[name=du'+i+']');");
   client.println("var en=form.querySelector('[name=en'+i+']');");
   client.println("if(en&&en.checked){");
-  client.println("if(th&&parseFloat(th.value)<=0){alert('Rule '+(i+1)+': Threshold must be > 0');return false;}");
-  client.println("if(du&&parseInt(du.value)<=0){alert('Rule '+(i+1)+': Duration must be > 0');return false;}");
+  client.println("if(th&&parseFloat(th.value)<=0){alert('Rule '+(i+1)+': '+(LANG==='jp'?'閾値は0より大きく設定してください':'Threshold must be > 0'));return false;}");
+  client.println("if(du&&parseInt(du.value)<=0){alert('Rule '+(i+1)+': '+(LANG==='jp'?'灌水時間は0より大きく設定してください':'Duration must be > 0'));return false;}");
   client.println("}}");
   client.println("return submitForm(form,btn);}");
   client.println("function irLoad(){");

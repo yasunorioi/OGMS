@@ -13,6 +13,7 @@ th{background:#191a1b;color:#d0d6e0}
 .on{color:#66bb6a;font-weight:bold}.off{color:#ef5350}
 input[type=number]{padding:3px;background:#1a1a1f;color:#eee;border:1px solid #3e3e44;border-radius:3px}
 input[type=submit]{background:#1976d2;color:#fff;border:none;padding:8px 20px;border-radius:4px;cursor:pointer;margin-top:10px}
+input[type=submit]:disabled{opacity:0.5;cursor:not-allowed}
 select{padding:3px;background:#1a1a1f;color:#eee;border:1px solid #3e3e44;border-radius:3px}
 a{color:#d0d6e0}.note{color:#8a8f98;font-size:0.85em}
 .msg{margin:8px 0;padding:6px;font-weight:bold}
@@ -50,7 +51,7 @@ void printNavLinks(WiFiClient& client) {
 
 static const char FORM_JS[] PROGMEM = R"JS(
 function submitForm(form,btn){
-  btn.disabled=true;btn.dataset.orig=btn.value;btn.value='Saving...';
+  btn.disabled=true;btn.dataset.orig=btn.value;btn.value=LANG==='jp'?'保存中...':'Saving...';
   var msg=form.querySelector('.msg');if(msg)msg.textContent='';
   fetch(form.action,{method:'POST',body:new URLSearchParams(new FormData(form))})
   .then(function(r){return r.json();})
@@ -58,15 +59,15 @@ function submitForm(form,btn){
     btn.disabled=false;btn.value=btn.dataset.orig;
     if(!msg){msg=document.createElement('div');msg.className='msg';form.appendChild(msg);}
     if(d.ok){
-      msg.style.color='#66bb6a';msg.textContent='\u2713 Saved';
-      if(d.reboot){msg.textContent='\u2713 Saved. Rebooting...';setTimeout(function(){location.href='/';},3000);}
-    }else{msg.style.color='#ef5350';msg.textContent='\u2717 Error: '+(d.error||'Unknown');}
+      msg.style.color='#66bb6a';msg.textContent=LANG==='jp'?'\u2713 保存しました':'\u2713 Saved';
+      if(d.reboot){msg.textContent=LANG==='jp'?'\u2713 保存しました。再起動中...':'\u2713 Saved. Rebooting...';setTimeout(function(){location.href='/';},3000);}
+    }else{msg.style.color='#ef5350';msg.textContent=(LANG==='jp'?'\u2717 エラー: ':'\u2717 Error: ')+(d.error||'Unknown');}
     setTimeout(function(){msg.textContent='';},5000);
   })
   .catch(function(e){
     btn.disabled=false;btn.value=btn.dataset.orig;
     if(!msg){msg=document.createElement('div');msg.className='msg';form.appendChild(msg);}
-    msg.style.color='#ef5350';msg.textContent='\u2717 Connection error';
+    msg.style.color='#ef5350';msg.textContent=LANG==='jp'?'\u2717 接続エラー':'\u2717 Connection error';
   });
   return false;
 }
@@ -77,9 +78,9 @@ void sendCommonHead(WiFiClient& client, const char* title) {
   client.println("Content-Type: text/html; charset=UTF-8");
   client.println("Connection: close");
   client.println();
-  client.printf("<!DOCTYPE html><html><head><meta charset=UTF-8>");
+  client.printf("<!DOCTYPE html><html lang=\"%s\"><head><meta charset=UTF-8>", g_language==1?"ja":"en");
   client.printf("<meta name=viewport content='width=device-width,initial-scale=1'>");
   client.printf("<title>%s</title><style>", title);
   client.print(COMMON_CSS);
-  client.println("</style>");
+  client.printf("</style><script>var LANG='%s';</script>\n", g_language==1?"jp":"en");
 }

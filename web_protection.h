@@ -5,12 +5,12 @@
 // ============================================================
 void sendProtectionPage(WiFiClient& client) {
   sendCommonHead(client, L("Protection", "保護制御"));
-  client.println("<style>input[type=number]{width:70px}select{width:80px}");
+  client.println("<style>input[type=number]{width:60px}select{width:80px}");
   client.println("fieldset{border:1px solid #3e3e44;border-radius:6px;padding:12px;margin:12px 0}");
   client.println("legend{color:#5e6ad2;font-weight:bold}</style></head><body>");
   client.printf("<h2>%s</h2>\n", L("Protection", "保護制御"));
   printNavLinks(client);
-  client.println("<div class=sec id=pstat>Loading...</div>");
+  client.printf("<div class=sec id=pstat>%s</div>\n", L("Loading...","読み込み中..."));
 
   client.println("<form action=/api/protection onsubmit=\"return protSubmit(this,this.querySelector('[type=submit]'))\">");
   client.printf("<fieldset><legend>%s</legend>\n", L("Dew Prevention", "結露対策"));
@@ -91,7 +91,7 @@ void sendProtectionPage(WiFiClient& client) {
   client.printf("if(!(dew&&dew.checked)&&!(rate&&rate.checked)&&!(co2&&co2.checked)&&!confirm('%s'))return false;\n",
     L("All protection rules will be disabled. Continue?", "全保護ルールが無効になります。続けますか？"));
   client.println("var rthr=form.querySelector('[name=rthr]');");
-  client.println("if(rthr&&parseFloat(rthr.value)<=0){alert('Rate threshold must be > 0');return false;}");
+  client.println("if(rthr&&parseFloat(rthr.value)<=0){alert(LANG==='jp'?'変化率閾値は0より大きく設定してください':'Rate threshold must be > 0');return false;}");
   client.println("return submitForm(form,btn);}");
   client.println("function pLoad(){");
   client.println("fetch('/api/state').then(function(r){return r.json();}).then(function(d){");

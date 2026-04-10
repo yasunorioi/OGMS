@@ -5,12 +5,12 @@
 // ============================================================
 void sendOTAPage(WiFiClient& client) {
   sendCommonHead(client, L("Firmware Update", "ファームウェア更新"));
-  client.println("<style>.sec{padding:16px}");
+  client.println("<style>.sec{padding:12px}");
   client.println("#prog{width:100%;height:24px;background:#2e2e2e;border-radius:4px;margin:10px 0;display:none}");
   client.println("#progBar{height:100%;background:#1976d2;border-radius:4px;width:0%;transition:width 0.3s}");
   client.println("#msg{margin:10px 0;font-weight:bold}");
   client.println("input[type=file]{margin:8px 0}");
-  client.println("button{background:#1976d2;color:#fff;border:none;padding:8px 20px;border-radius:4px;cursor:pointer}");
+  client.println("button{background:#1976d2;color:#fff;border:none;padding:8px 20px;border-radius:4px;cursor:pointer}"); // button (not input[type=submit]) intentional: XHR upload requires JS onclick, not form submit
   client.println("button:disabled{background:#555}</style></head><body>");
   client.printf("<h2>%s</h2>\n", L("Firmware Update", "ファームウェア更新"));
   printNavLinks(client);
@@ -35,10 +35,10 @@ void sendOTAPage(WiFiClient& client) {
   client.println("xhr.setRequestHeader('Content-Type','application/octet-stream');");
   client.println("xhr.upload.onprogress=function(e){if(e.lengthComputable)bar.style.width=Math.round(e.loaded/e.total*100)+'%';};");
   client.println("xhr.onload=function(){");
-  client.println("if(xhr.status==200){msg.textContent='Success! Rebooting...';bar.style.width='100%';bar.style.background='#4caf50';");
+  client.println("if(xhr.status==200){msg.textContent=LANG==='jp'?'成功！再起動中...':'Success! Rebooting...';bar.style.width='100%';bar.style.background='#66bb6a';");
   client.println("setTimeout(function(){window.location='/';},8000);}");
-  client.println("else{msg.textContent='Error: '+xhr.responseText;btn.disabled=false;bar.style.background='#f44336';}};");
-  client.println("xhr.onerror=function(){msg.textContent='Upload failed (connection lost). Device may be rebooting...';");
+  client.println("else{msg.textContent=(LANG==='jp'?'エラー: ':'Error: ')+xhr.responseText;btn.disabled=false;bar.style.background='#ef5350';}};");
+  client.println("xhr.onerror=function(){msg.textContent=LANG==='jp'?'アップロード失敗（接続断）。デバイスが再起動中の可能性があります...':'Upload failed (connection lost). Device may be rebooting...';");
   client.println("setTimeout(function(){window.location='/';},8000);};");
   client.println("xhr.send(f);}");
   client.println("</script></body></html>");

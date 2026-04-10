@@ -143,15 +143,15 @@ load();setInterval(load,5000);
 void sendDashboard(WiFiClient& client) {
   sendCommonHead(client, L("CCM Relay Node", "CCMリレーノード"));
   client.println("<style>"
-    ".bon{background:#43a047;color:#fff;border:none;padding:4px 8px;border-radius:3px;cursor:pointer}"
-    ".bof{background:#e53935;color:#fff;border:none;padding:4px 8px;border-radius:3px;cursor:pointer}"
+    ".bon{background:#43a047;color:#fff;border:none;padding:8px 16px;border-radius:3px;cursor:pointer}"
+    ".bof{background:#e53935;color:#fff;border:none;padding:8px 16px;border-radius:3px;cursor:pointer}"
     ".ccm{color:#ffa726;font-size:0.85em}"
     "</style></head><body>");
   client.printf("<h2>%s</h2>\n", L("CCM Relay Node (UECS)", "CCMリレーノード (UECS)"));
   printNavLinks(client);
-  client.println("<div class=sec id=sys></div>");
-  client.println("<div class=sec id=net></div>");
-  client.println("<div class=sec id=devstat></div>");
+  client.printf("<div class=sec id=sys>%s</div>\n", L("Loading...","読み込み中..."));
+  client.printf("<div class=sec id=net>%s</div>\n", L("Loading...","読み込み中..."));
+  client.printf("<div class=sec id=devstat>%s</div>\n", L("Loading...","読み込み中..."));
   client.println("<div class=sec>");
   client.printf("<h3>%s</h3>\n", L("Relay / CCM Mapping", "リレー/CCM割当"));
   client.printf("<table><tr><th>CH</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th></tr>\n",
