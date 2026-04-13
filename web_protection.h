@@ -37,6 +37,16 @@ void sendProtectionPage(WiFiClient& client) {
   for (int c = 0; c < 8; c++)
     client.printf("<option value=%d%s>CH%d</option>", c, dewCtrl.heater_relay_ch == c ? " selected" : "", c + 1);
   client.printf("</select></td></tr>\n");
+
+  // Side window aperture for dew prevention
+  client.printf("<tr><th>%s</th><td><select name=dapt>", L("Side window slot","側窓スロット"));
+  client.printf("<option value=-1%s>-</option>", dewCtrl.apt_slot < 0 ? " selected" : "");
+  for (int s = 0; s < APT_SLOTS; s++)
+    client.printf("<option value=%d%s>Slot %d</option>", s, dewCtrl.apt_slot == s ? " selected" : "", s + 1);
+  client.printf("</select></td></tr>\n");
+  client.printf("<tr><th>%s</th><td><input type=number name=dapo value=%.0f min=0 max=100></td></tr>\n", L("Apt open %","側窓開度%"), dewCtrl.apt_open_pct);
+  client.printf("<tr><th>%s</th><td><input type=number name=dapc value=%.0f min=0 max=100></td></tr>\n", L("Apt close %","終了時開度%"), dewCtrl.apt_close_pct);
+  client.printf("<tr><th>%s</th><td><input type=number name=damt value=%.1f min=-10 max=40 step=0.5></td></tr>\n", L("Min temp (C)","低温ガード(C)"), dewCtrl.apt_min_temp);
   client.println("</table></fieldset>");
 
   client.printf("<fieldset><legend>%s</legend>\n", L("Temp Rate Guard", "温度急変対策"));
@@ -139,6 +149,10 @@ void handleProtectionPost(WiFiClient& client, const String& body) {
   String am  = getField("amin"); if (am.length() > 0)  dewCtrl.after_sunrise_min = am.toInt();
   String df  = getField("dfan"); if (df.length() > 0)  dewCtrl.fan_relay_ch = df.toInt();
   String dh  = getField("dheat");if (dh.length() > 0)  dewCtrl.heater_relay_ch = dh.toInt();
+  String da  = getField("dapt"); if (da.length() > 0)  dewCtrl.apt_slot = constrain(da.toInt(), -1, APT_SLOTS - 1);
+  String dao = getField("dapo"); if (dao.length() > 0) dewCtrl.apt_open_pct = constrain(dao.toFloat(), 0.0, 100.0);
+  String dac = getField("dapc"); if (dac.length() > 0) dewCtrl.apt_close_pct = constrain(dac.toFloat(), 0.0, 100.0);
+  String dmt = getField("damt"); if (dmt.length() > 0) dewCtrl.apt_min_temp = dmt.toFloat();
 
   // Rate Guard
   rateGuard.enabled = (getField("rate_en") == "1");
@@ -158,6 +172,7 @@ void handleProtectionPost(WiFiClient& client, const String& body) {
   // Reset runtimes
   dewRun.last_calc_day = -1;  // force recalc
   dewRun.active = false;
+  dewRun.apt_opened = false;
   rateRun = {NAN, 0, 0.0, false, 0};
   co2Run = {};
 

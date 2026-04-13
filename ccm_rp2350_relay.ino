@@ -206,6 +206,10 @@ struct DewPreventionCtrl {
   int    after_sunrise_min;  // 日の出の何分後に停止 (default 60)
   int    fan_relay_ch;     // 循環扇リレーch (0-7, -1=無効)
   int    heater_relay_ch;  // 暖房リレーch (0-7, -1=無効)
+  int    apt_slot;         // 側窓スロット (0-3, -1=無効)
+  float  apt_open_pct;     // 結露対策時の側窓開度 (%)
+  float  apt_close_pct;    // 結露対策終了時の側窓開度 (%)
+  float  apt_min_temp;     // 低温ガード: この温度以下では側窓を開けない (℃)
 };
 
 DewPreventionCtrl dewCtrl;
@@ -215,8 +219,9 @@ struct DewRuntime {
   int   sunrise_min;       // 今日の日の出時刻 (ローカル時、0時からの分)
   int   last_calc_day;     // 最後に計算した日 (day_of_year)
   bool  active;            // 結露対策稼働中
+  bool  apt_opened;        // 側窓が結露対策で開いているか
 };
-DewRuntime dewRun = {0, -1, false};
+DewRuntime dewRun = {0, -1, false, false};
 
 // ========== Temp Rate Guard (温度急変対策) ==========
 // 温度変化率が閾値を超えたらリレー制御
@@ -1880,6 +1885,10 @@ void loadDewConfig() {
   dewCtrl.after_sunrise_min  = 60;
   dewCtrl.fan_relay_ch      = -1;
   dewCtrl.heater_relay_ch   = -1;
+  dewCtrl.apt_slot          = -1;
+  dewCtrl.apt_open_pct      = 10.0;
+  dewCtrl.apt_close_pct     = 0.0;
+  dewCtrl.apt_min_temp      = 5.0;
 
   if (!LittleFS.exists("/dew_ctrl.json")) return;
   File f = LittleFS.open("/dew_ctrl.json", "r");
@@ -1895,6 +1904,10 @@ void loadDewConfig() {
   dewCtrl.after_sunrise_min  = doc["after_min"]  | 60;
   dewCtrl.fan_relay_ch      = doc["fan_ch"]     | -1;
   dewCtrl.heater_relay_ch   = doc["heater_ch"]  | -1;
+  dewCtrl.apt_slot          = doc["apt_slot"]   | -1;
+  dewCtrl.apt_open_pct      = doc["apt_open"]   | 10.0;
+  dewCtrl.apt_close_pct     = doc["apt_close"]  | 0.0;
+  dewCtrl.apt_min_temp      = doc["apt_min_t"]  | 5.0;
   Serial.printf("Dew: lat=%.2f lon=%.2f tz=%d before=%d after=%d\n",
                 dewCtrl.latitude, dewCtrl.longitude, dewCtrl.timezone_h,
                 dewCtrl.before_sunrise_min, dewCtrl.after_sunrise_min);
@@ -1910,6 +1923,10 @@ void saveDewConfig() {
   doc["after_min"]  = dewCtrl.after_sunrise_min;
   doc["fan_ch"]     = dewCtrl.fan_relay_ch;
   doc["heater_ch"]  = dewCtrl.heater_relay_ch;
+  doc["apt_slot"]   = dewCtrl.apt_slot;
+  doc["apt_open"]   = dewCtrl.apt_open_pct;
+  doc["apt_close"]  = dewCtrl.apt_close_pct;
+  doc["apt_min_t"]  = dewCtrl.apt_min_temp;
   File f = LittleFS.open("/dew_ctrl.json", "w");
   if (!f) return;
   serializeJson(doc, f);
@@ -1957,15 +1974,46 @@ void dewPreventionControl(unsigned long now) {
       claimRelay(dewCtrl.fan_relay_ch + 1, OWN_DEW);
     if (dewCtrl.heater_relay_ch >= 0 && dewCtrl.heater_relay_ch <= 7)
       claimRelay(dewCtrl.heater_relay_ch + 1, OWN_DEW);
+    // 側窓: 低温ガード確認後に開放
+    if (dewCtrl.apt_slot >= 0 && dewCtrl.apt_slot < APT_SLOTS) {
+      float temp = !isnan(g_sht40_temp) ? g_sht40_temp : g_ds18b20_temp;
+      if (!isnan(temp) && temp >= dewCtrl.apt_min_temp) {
+        setTargetAperture(dewCtrl.apt_slot, dewCtrl.apt_open_pct);
+        dewRun.apt_opened = true;
+      }
+    }
     Serial.printf("[DEW] ON — sunrise=%d:%02d now=%d:%02d\n",
                   dewRun.sunrise_min / 60, dewRun.sunrise_min % 60,
                   localMin / 60, localMin % 60);
-  } else if (!inWindow && dewRun.active) {
+  }
+
+  // 稼働中: 側窓の低温ガード（温度変化に追従）
+  if (inWindow && dewRun.active && dewCtrl.apt_slot >= 0 && dewCtrl.apt_slot < APT_SLOTS) {
+    float temp = !isnan(g_sht40_temp) ? g_sht40_temp : g_ds18b20_temp;
+    if (!isnan(temp)) {
+      if (temp < dewCtrl.apt_min_temp && dewRun.apt_opened) {
+        setTargetAperture(dewCtrl.apt_slot, dewCtrl.apt_close_pct);
+        dewRun.apt_opened = false;
+        Serial.printf("[DEW] Apt close — temp %.1fC < min %.1fC\n", temp, dewCtrl.apt_min_temp);
+      } else if (temp >= dewCtrl.apt_min_temp && !dewRun.apt_opened) {
+        setTargetAperture(dewCtrl.apt_slot, dewCtrl.apt_open_pct);
+        dewRun.apt_opened = true;
+        Serial.printf("[DEW] Apt open — temp %.1fC >= min %.1fC\n", temp, dewCtrl.apt_min_temp);
+      }
+    }
+  }
+
+  if (!inWindow && dewRun.active) {
     dewRun.active = false;
     if (dewCtrl.fan_relay_ch >= 0 && dewCtrl.fan_relay_ch <= 7)
       releaseRelay(dewCtrl.fan_relay_ch + 1, OWN_DEW);
     if (dewCtrl.heater_relay_ch >= 0 && dewCtrl.heater_relay_ch <= 7)
       releaseRelay(dewCtrl.heater_relay_ch + 1, OWN_DEW);
+    // 側窓: 終了時開度へ
+    if (dewCtrl.apt_slot >= 0 && dewCtrl.apt_slot < APT_SLOTS && dewRun.apt_opened) {
+      setTargetAperture(dewCtrl.apt_slot, dewCtrl.apt_close_pct);
+      dewRun.apt_opened = false;
+    }
     Serial.printf("[DEW] OFF — window ended\n");
   }
 }

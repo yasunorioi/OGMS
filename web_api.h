@@ -149,6 +149,11 @@ void sendAPIState(WiFiClient& client) {
       snprintf(sr, sizeof(sr), "%d:%02d", dewRun.sunrise_min / 60, dewRun.sunrise_min % 60);
       dew["sunrise"] = sr;
     }
+    dew["apt_slot"]    = dewCtrl.apt_slot;
+    dew["apt_open"]    = dewCtrl.apt_open_pct;
+    dew["apt_close"]   = dewCtrl.apt_close_pct;
+    dew["apt_min_temp"] = dewCtrl.apt_min_temp;
+    dew["apt_opened"]  = dewRun.apt_opened;
     JsonObject rate = prot["rate"].to<JsonObject>();
     rate["enabled"] = rateGuard.enabled;
     rate["active"]  = rateRun.active;
