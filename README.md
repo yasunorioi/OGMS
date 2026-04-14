@@ -55,6 +55,8 @@ Arduino firmware for **Waveshare RP2350-ETH-8DI-8RO / RP2350-POE-ETH-8DI-8RO**.
 5. ArSproutのCCMネットワークに自動参加 — **ArSprout側の設定変更は不要**
 6. 2回目以降のFW更新は `/ota` ページからブラウザでアップロード
 
+> **操作マニュアル**: 各設定項目の詳細は [docs/operation-manual.pdf](docs/operation-manual.pdf) を参照してください。
+
 ---
 
 ## ボード設定
@@ -335,6 +337,10 @@ Room=2（ArSprout=Room 1との共存）、Order=CH番号。
 ├── sw_watchdog.h           # SW WDT
 ├── sensor_registry.h      # I2Cセンサー定義
 ├── platformio.ini          # PlatformIO設定
+├── docs/
+│   ├── operation-manual.md   # 操作マニュアル (Markdown原本)
+│   ├── operation-manual.pdf  # 操作マニュアル (PDF)
+│   └── pdf-header.tex        # PDF生成用LaTeXヘッダー
 └── README.md
 ```
 
