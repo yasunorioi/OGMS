@@ -19,7 +19,7 @@ void sendConfigPage(WiFiClient& client) {
     }
   }
 
-  sendCommonHead(client, L("Config - CCM Relay", "設定 - CCM Relay"));
+  sendCommonHead(client, L("Config - OGMS", "設定 - OGMS"));
   client.println("<style>label{display:block;margin:6px 0 2px}");
   client.println("input[type=text],input[type=number]{width:220px;padding:4px;background:#1a1a1f;color:#eee;border:1px solid #3e3e44;border-radius:3px}</style></head><body>");
   client.printf("<h2>%s</h2>\n", L("Network Configuration", "ネットワーク設定"));

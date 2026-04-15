@@ -1,4 +1,4 @@
-// ccm_rp2350_relay.ino - Waveshare 8ch Relay + DI Node (RP2350B) — MQTT版
+// ogms.ino - OGMS (Open Greenhouse Management System) — Waveshare 8ch Relay + DI Node (RP2350B)
 // Board: RP2350-ETH-8DI-8RO / RP2350-POE-ETH-8DI-8RO
 // Protocol: MQTT over TCP (PubSubClient)
 // Relay: GPIO17-24 直接制御
@@ -32,17 +32,17 @@
 
 // ========== Firmware Version ==========
 const char* FW_VERSION = "2.0.0";
-const char* FW_NAME    = "mqtt_rp2350_relay";
+const char* FW_NAME    = "ogms";
 
 // ========== Default Configuration ==========
-const char* DEFAULT_NODE_NAME     = "UECS-Pi Relay";
+const char* DEFAULT_NODE_NAME     = "OGMS";
 const char* DEFAULT_IP            = "";          // 空=DHCP
 const char* DEFAULT_SUBNET        = "255.255.255.0";
 const char* DEFAULT_GATEWAY       = "192.168.1.1";
 const char* DEFAULT_DNS           = "192.168.1.1";
 const bool  DEFAULT_MDNS_ENABLED   = true;
-const char* DEFAULT_MDNS_HOSTNAME  = "uecs-ccm-01";
-const char* DEFAULT_NODE_ID        = "ccm_relay_01";
+const char* DEFAULT_MDNS_HOSTNAME  = "ogms-01";
+const char* DEFAULT_NODE_ID        = "ogms-01";
 
 // ========== W5500 SPI1 Pins ==========
 const int W5500_CS   = 33;
@@ -1002,7 +1002,7 @@ void initMqtt() {
     uint8_t mac[6];
     eth.macAddress(mac);
     snprintf(mqttCfg.client_id, sizeof(mqttCfg.client_id),
-             "agri-relay-%02X%02X", mac[4], mac[5]);
+             "ogms-%02X%02X", mac[4], mac[5]);
   }
 
   mqttClient.setServer(mqttCfg.broker, mqttCfg.port);
