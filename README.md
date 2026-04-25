@@ -37,6 +37,112 @@ Standalone greenhouse control, irrigation, and protection features built-in. EN/
 
 </details>
 
+## Architecture
+
+```mermaid
+flowchart TD
+
+subgraph group_firmware_core["Firmware core"]
+  node_ogms_main(("OGMS core<br/>firmware runtime<br/>[ogms.ino]"))
+  node_relay_arbitration["Relay arbiter<br/>control mixer<br/>[ogms.ino]"]
+  node_state_persist[("State store<br/>json persistence<br/>[ogms.ino]")]
+  node_watchdog["Watchdog<br/>safety timer<br/>[sw_watchdog.h]"]
+end
+
+subgraph group_hardware_io["Hardware I/O"]
+  node_sensor_registry["Sensor registry<br/>i2c discovery<br/>[sensor_registry.h]"]
+  node_i2c_sensors["I2C sensors<br/>sensor bus"]
+  node_ds18b20["DS18B20<br/>1-wire temp"]
+  node_serial_sen0575["SEN0575<br/>uart sensor"]
+  node_gpio_relays["On-board relays<br/>gpio outputs"]
+  node_digital_inputs["Digital inputs<br/>gpio inputs"]
+  node_status_led["Status LED<br/>ws2812 indicator"]
+  node_modbus_master["Modbus master<br/>rs485 actuator bus<br/>[modbus_master.h]"]
+end
+
+subgraph group_network_ui["Network and UI"]
+  node_mqtt_client["MQTT client<br/>pubsub client<br/>[ogms.ino]"]
+  node_web_api["Web API<br/>http/json api<br/>[web_api.h]"]
+  node_web_ui["Web UI<br/>hosted pages<br/>[web_dashboard.h]"]
+  node_web_common["UI common<br/>shared ui<br/>[web_common.h]"]
+  node_maintenance["Maintenance links<br/>transport access<br/>[usb_ncm.h]"]
+  node_ota_update["OTA update<br/>firmware update<br/>[web_ota.h]"]
+  node_mqtt_config["MQTT config<br/>settings module<br/>[web_mqtt.h]"]
+  node_modbus_ui["Modbus UI<br/>settings module<br/>[web_modbus.h]"]
+  node_config_ui["Config UI<br/>settings module<br/>[web_config.h]"]
+end
+
+subgraph group_control_policies["Control policies"]
+  node_greenhouse_control["Greenhouse control<br/>policy module<br/>[web_greenhouse.h]"]
+  node_irrigation_control["Irrigation<br/>policy module<br/>[web_irrigation.h]"]
+  node_protection_control["Protection<br/>policy module<br/>[web_protection.h]"]
+end
+
+node_ogms_main -->|"controls"| node_relay_arbitration
+node_ogms_main -->|"loads/saves"| node_state_persist
+node_ogms_main -->|"feeds"| node_watchdog
+node_ogms_main -->|"discovers"| node_sensor_registry
+node_sensor_registry -->|"defines"| node_i2c_sensors
+node_ogms_main -->|"polls"| node_ds18b20
+node_ogms_main -->|"reads"| node_serial_sen0575
+node_ogms_main -->|"drives"| node_gpio_relays
+node_ogms_main -->|"samples"| node_digital_inputs
+node_ogms_main -->|"indicates"| node_status_led
+node_ogms_main -->|"expands to"| node_modbus_master
+node_ogms_main -->|"publishes/subscribes"| node_mqtt_client
+node_ogms_main -->|"serves"| node_web_api
+node_web_api -->|"backs"| node_web_ui
+node_web_ui -->|"shares"| node_web_common
+node_web_ui -->|"includes"| node_config_ui
+node_web_ui -->|"includes"| node_mqtt_config
+node_web_ui -->|"includes"| node_greenhouse_control
+node_web_ui -->|"includes"| node_irrigation_control
+node_web_ui -->|"includes"| node_protection_control
+node_web_ui -->|"includes"| node_modbus_ui
+node_web_ui -->|"includes"| node_ota_update
+node_maintenance -.->|"accesses"| node_ogms_main
+node_greenhouse_control -->|"claims relays"| node_relay_arbitration
+node_irrigation_control -->|"claims relays"| node_relay_arbitration
+node_protection_control -->|"claims relays"| node_relay_arbitration
+node_mqtt_client -->|"feeds weather"| node_greenhouse_control
+node_mqtt_client -->|"feeds weather"| node_irrigation_control
+node_mqtt_client -->|"feeds telemetry"| node_protection_control
+node_mqtt_client -->|"commands"| node_ogms_main
+node_web_api -->|"updates"| node_state_persist
+node_web_api -->|"manages"| node_relay_arbitration
+
+click node_ogms_main "https://github.com/yasunorioi/OGMS/blob/main/ogms.ino"
+click node_relay_arbitration "https://github.com/yasunorioi/OGMS/blob/main/ogms.ino"
+click node_state_persist "https://github.com/yasunorioi/OGMS/blob/main/ogms.ino"
+click node_watchdog "https://github.com/yasunorioi/OGMS/blob/main/sw_watchdog.h"
+click node_sensor_registry "https://github.com/yasunorioi/OGMS/blob/main/sensor_registry.h"
+click node_modbus_master "https://github.com/yasunorioi/OGMS/blob/main/modbus_master.h"
+click node_mqtt_client "https://github.com/yasunorioi/OGMS/blob/main/ogms.ino"
+click node_web_api "https://github.com/yasunorioi/OGMS/blob/main/web_api.h"
+click node_web_ui "https://github.com/yasunorioi/OGMS/blob/main/web_dashboard.h"
+click node_web_common "https://github.com/yasunorioi/OGMS/blob/main/web_common.h"
+click node_maintenance "https://github.com/yasunorioi/OGMS/blob/main/usb_ncm.h"
+click node_ota_update "https://github.com/yasunorioi/OGMS/blob/main/web_ota.h"
+click node_greenhouse_control "https://github.com/yasunorioi/OGMS/blob/main/web_greenhouse.h"
+click node_irrigation_control "https://github.com/yasunorioi/OGMS/blob/main/web_irrigation.h"
+click node_protection_control "https://github.com/yasunorioi/OGMS/blob/main/web_protection.h"
+click node_mqtt_config "https://github.com/yasunorioi/OGMS/blob/main/web_mqtt.h"
+click node_modbus_ui "https://github.com/yasunorioi/OGMS/blob/main/web_modbus.h"
+click node_config_ui "https://github.com/yasunorioi/OGMS/blob/main/web_config.h"
+
+classDef toneNeutral fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a
+classDef toneBlue fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#172554
+classDef toneAmber fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f
+classDef toneMint fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#14532d
+classDef toneRose fill:#ffe4e6,stroke:#e11d48,stroke-width:1.5px,color:#881337
+classDef toneIndigo fill:#e0e7ff,stroke:#4f46e5,stroke-width:1.5px,color:#312e81
+classDef toneTeal fill:#ccfbf1,stroke:#0f766e,stroke-width:1.5px,color:#134e4a
+class node_ogms_main,node_relay_arbitration,node_state_persist,node_watchdog toneBlue
+class node_sensor_registry,node_i2c_sensors,node_ds18b20,node_serial_sen0575,node_gpio_relays,node_digital_inputs,node_status_led,node_modbus_master toneAmber
+class node_mqtt_client,node_web_api,node_web_ui,node_web_common,node_maintenance,node_ota_update,node_mqtt_config,node_modbus_ui,node_config_ui toneMint
+class node_greenhouse_control,node_irrigation_control,node_protection_control toneRose
+```
+
 ## Features
 
 | Feature | Implementation |
