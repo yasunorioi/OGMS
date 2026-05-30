@@ -33,7 +33,7 @@
 #include "usb_ncm.h"
 
 // ========== Firmware Version ==========
-const char* FW_VERSION = "2.1.1-modbus";
+const char* FW_VERSION = "2.1.2-modbus";
 const char* FW_NAME    = "ogms";
 
 // ========== Default Configuration ==========
@@ -2174,6 +2174,44 @@ void initEthernet() {
                 eth.subnetMask().toString().c_str());
 }
 
+// Poll the W5500 PHY link state and recover DHCP when a LAN cable is
+// plugged in after boot.
+//
+// LwipIntfDev::begin() calls dhcp_start() exactly once at startup and
+// never watches the W5500 PHY for link transitions, so if the cable was
+// unplugged at boot the W5500 socket ends up in a state that the lighter
+// recoveries (netif_set_link_up + dhcp_renew/dhcp_start) couldn't unwedge
+// in practice. The reliable fix is to tear the whole eth stack down and
+// rebuild it on the OFF→ON edge — eth.end() does dhcp_stop + netif_remove
+// + W5500 socket close, and eth.begin() reopens the W5500 in MACRAW mode
+// and fires a fresh dhcp_start(). USB-NCM is a separate netif so it isn't
+// disturbed.
+void ethLinkPoll() {
+  static unsigned long lastCheck = 0;
+  static EthernetLinkStatus prevLink = Unknown;
+
+  unsigned long now = millis();
+  if (now - lastCheck < 2000) return;
+  lastCheck = now;
+
+  EthernetLinkStatus cur = eth.linkStatus();
+  if (cur == prevLink) return;
+
+  // Only act on a confirmed LinkOFF→LinkON edge. The first poll after
+  // boot sees Unknown→{ON,OFF}; if it was ON we'd otherwise tear down
+  // and rebuild a perfectly working DHCP lease for no reason.
+  if (cur == LinkON && prevLink == LinkOFF) {
+    Serial.println("[ETH] link UP — restarting W5500 (eth.end + eth.begin)");
+    eth.end();
+    bool ok = eth.begin();
+    if (!ok) Serial.println("[ETH] eth.begin() failed");
+  } else if (cur == LinkOFF && prevLink == LinkON) {
+    Serial.println("[ETH] link DOWN");
+    netif_set_link_down(eth.getNetIf());
+  }
+  prevLink = cur;
+}
+
 void rebootWithReason(const char* reason) {
   Serial.printf("Rebooting: %s\n", reason);
   File file = LittleFS.open("/reboot_reason.txt", "w");
@@ -2435,6 +2473,7 @@ void loop() {
 
   // W5500 が落ちても reboot しない。USB-NCM 経由でアクセス可能にするため。
   // LED が赤/黄交互で eth 切断を示す。30 秒毎の [STATUS] でログにも残る。
+  ethLinkPoll();  // 後挿しケーブルからの DHCP 自動復旧
 
   if (mdns_enabled) MDNS.update();
 
