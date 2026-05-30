@@ -9,9 +9,11 @@
 #define USB_NCM_H
 
 #include <Adafruit_TinyUSB.h>
+#include <lwip/init.h>
 #include <lwip/netif.h>
 #include <lwip/pbuf.h>
 #include <lwip/udp.h>
+#include <lwip/dhcp.h>
 #include <lwip/ip4_addr.h>
 #include <lwip/etharp.h>
 #include <netif/ethernet.h>
@@ -54,9 +56,11 @@ public:
 
     memcpy(buf, desc, desc_len);
 
-    // NCM uses 2 interfaces (control + data); addInterface counts 1 from IAD,
-    // we need to account for the data interface
-    TinyUSBDevice.allocInterface(1);
+    // NCM uses 2 interfaces (control + data). addInterface() reads
+    // _itf_count AFTER this returns to set bNumInterfaces, so we must
+    // bump it by 2 here — otherwise bNumInterfaces is short by 1 and
+    // the host never binds a driver to the data interface.
+    TinyUSBDevice.allocInterface(2);
 
     return desc_len;
   }
@@ -82,8 +86,15 @@ bool usb_ncm_dev_begin(void) { return usb_ncm_dev.begin(); }
 
 // ========== Internal State ==========
 static struct netif usb_netif;
-static struct pbuf *usb_received_frame = NULL;
 static bool usb_ncm_initialized = false;
+
+// Raw-byte staging buffer used to hand frames from the USB IRQ to loop()
+// without doing pbuf_alloc inside the IRQ. PBUF_POOL was returning NULL
+// for every recv (likely starved by mDNS) and PBUF_RAM acquires the lwIP
+// memory mutex which deadlocks when called from IRQ while setup holds it.
+#define USB_NCM_STAGE_MTU 1600
+static uint8_t  usb_rx_stage[USB_NCM_STAGE_MTU];
+static volatile uint16_t usb_rx_stage_len = 0;  // 0 = empty
 
 // ========== lwIP netif output → TinyUSB ==========
 
@@ -127,15 +138,11 @@ static err_t usb_ncm_netif_init(struct netif *nif) {
 // ========== TinyUSB NCM Callbacks ==========
 
 bool tud_network_recv_cb(const uint8_t *src, uint16_t size) {
-  if (usb_received_frame) return false;
-
-  if (size) {
-    struct pbuf *p = pbuf_alloc(PBUF_RAW, size, PBUF_POOL);
-    if (p) {
-      memcpy(p->payload, src, size);
-      usb_received_frame = p;
-    }
-  }
+  // Drop if previous staging frame not yet consumed by loop().
+  if (usb_rx_stage_len != 0) return false;
+  if (size == 0 || size > USB_NCM_STAGE_MTU) return true;  // accept-and-drop
+  memcpy(usb_rx_stage, src, size);
+  usb_rx_stage_len = size;
   return true;
 }
 
@@ -146,10 +153,8 @@ uint16_t tud_network_xmit_cb(uint8_t *dst, void *ref, uint16_t arg) {
 }
 
 void tud_network_init_cb(void) {
-  if (usb_received_frame) {
-    pbuf_free(usb_received_frame);
-    usb_received_frame = NULL;
-  }
+  // Reset the staging slot — pbuf path is gone; loop() now allocates.
+  usb_rx_stage_len = 0;
 }
 
 // ========== Minimal DHCP Server (USB-NCM side only) ==========
@@ -272,9 +277,12 @@ static void usb_dhcp_recv(void *arg, struct udp_pcb *upcb, struct pbuf *p,
 
 // ========== Public API ==========
 
-// Call AFTER W5500 netif is initialized and set as default.
+// Plan B 対応: W5500 より先に呼ばれても安全なように lwip_init() を明示。
+// arduino-pico の wrap で idempotent なので二度呼びでも問題なし。
 void usb_ncm_init(void) {
   if (usb_ncm_initialized) return;
+
+  lwip_init();
 
   ip4_addr_t ip, mask, gw;
   IP4_ADDR(&ip,   192, 168, 7, 1);
@@ -291,13 +299,15 @@ void usb_ncm_init(void) {
   // Notify host that USB link is up
   tud_network_link_state(0, true);
 
-  // Start DHCP server bound to USB-NCM interface only
-  // (IP_ADDR_ANY would conflict with W5500 DHCP client on port 68)
+  // Start DHCP server. Must bind to IP_ADDR_ANY because the host sends
+  // DHCPDISCOVER to the limited broadcast 255.255.255.255; lwIP only
+  // delivers broadcast UDP to PCBs bound to ANY, not to a specific IP.
+  // udp_bind_netif() restricts delivery to USB-NCM only, so we don't
+  // race with the W5500 segment. (No conflict with the W5500 DHCP
+  // *client*: that uses port 68, this server uses port 67.)
   usb_dhcp_pcb = udp_new();
   if (usb_dhcp_pcb) {
-    ip_addr_t usb_ip;
-    ip_addr_set_ip4_u32(&usb_ip, ip.addr);
-    udp_bind(usb_dhcp_pcb, &usb_ip, 67);
+    udp_bind(usb_dhcp_pcb, IP_ADDR_ANY, 67);
     udp_bind_netif(usb_dhcp_pcb, &usb_netif);
     udp_recv(usb_dhcp_pcb, usb_dhcp_recv, NULL);
   }
@@ -311,13 +321,21 @@ void usb_ncm_init(void) {
 void usb_ncm_service(void) {
   if (!usb_ncm_initialized) return;
 
-  if (usb_received_frame) {
-    if (ethernet_input(usb_received_frame, &usb_netif) != ERR_OK) {
-      pbuf_free(usb_received_frame);
-    }
-    usb_received_frame = NULL;
-    tud_network_recv_renew();
+  uint16_t len = usb_rx_stage_len;
+  if (len == 0) return;
+
+  // Allocate pbuf in main-thread context — safe to use heap mutex here.
+  // Try PBUF_POOL first (cheap), fall back to PBUF_RAM if the pool is full.
+  struct pbuf *p = pbuf_alloc(PBUF_RAW, len, PBUF_POOL);
+  if (!p) p = pbuf_alloc(PBUF_RAW, len, PBUF_RAM);
+  if (p) {
+    memcpy(p->payload, usb_rx_stage, len);
+    if (ethernet_input(p, &usb_netif) != ERR_OK) pbuf_free(p);
   }
+
+  // Release the staging slot and tell TinyUSB it can receive the next frame.
+  usb_rx_stage_len = 0;
+  tud_network_recv_renew();
 }
 
 // Get USB-NCM interface IP as string

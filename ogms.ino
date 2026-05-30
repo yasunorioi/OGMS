@@ -33,7 +33,7 @@
 #include "usb_ncm.h"
 
 // ========== Firmware Version ==========
-const char* FW_VERSION = "2.1.0-modbus";
+const char* FW_VERSION = "2.1.1-modbus";
 const char* FW_NAME    = "ogms";
 
 // ========== Default Configuration ==========
@@ -2151,8 +2151,10 @@ void initEthernet() {
   unsigned long start = millis();
   while (!eth.connected()) {
     if (millis() - start > (unsigned long)ETH_CONNECT_TIMEOUT * 1000UL) {
-      Serial.println("[ERR] DHCP timeout, retrying...");
-      rebootWithReason("eth_timeout");
+      Serial.println();
+      Serial.println("[WARN] W5500 link/DHCP timeout — continuing without Ethernet");
+      Serial.println("[WARN] Access via USB-NCM (192.168.7.1). LED blinks red/yellow.");
+      return;
     }
     delay(500);
     Serial.print(".");
@@ -2355,10 +2357,19 @@ void setup() {
   Serial.printf("Node=%s\n", nodeId.c_str());
   Serial.printf("[BOOT] hostname: %s.local\n", mdnsHostname.c_str());
 
-  initEthernet();
+  // RGB LED — initEthernet() より前に初期化しておく。タイムアウト時に
+  // loop() が赤/黄交互で「W5500 が UP しない」状態を表示できるようにする。
+  rgbLED.begin();
+  rgbLED.setBrightness(30);  // 控えめ
+  rgbLED.setPixelColor(0, rgbLED.Color(0, 0, 50));  // 起動中=青
+  rgbLED.show();
 
-  // USB-NCM: secondary netif (link-local, W5500 remains default)
+  // Plan B: USB-NCM を W5500 より先に立ち上げる。これにより
+  // (1) initEthernet() の 15 秒待ちの最中でも USB 経由でアクセス可能、
+  // (2) usb_ncm_init() の lwIP 呼び出しが W5500 初期化と独立する。
   usb_ncm_init();
+
+  initEthernet();
 
   syncNTP();
   scanI2CSensors();
@@ -2372,12 +2383,6 @@ void setup() {
   } else {
     Serial.println("DS18B20: not found (continuing)");
   }
-
-  // RGB LED
-  rgbLED.begin();
-  rgbLED.setBrightness(30);  // 控えめ
-  rgbLED.setPixelColor(0, rgbLED.Color(0, 0, 50));  // 起動中=青
-  rgbLED.show();
 
   readSensors();
   initRS485();
@@ -2428,9 +2433,8 @@ void loop() {
     rebootWithReason("periodic_reboot");
   }
 
-  if (!eth.connected()) {
-    rebootWithReason("eth_disconnected");
-  }
+  // W5500 が落ちても reboot しない。USB-NCM 経由でアクセス可能にするため。
+  // LED が赤/黄交互で eth 切断を示す。30 秒毎の [STATUS] でログにも残る。
 
   if (mdns_enabled) MDNS.update();
 
@@ -2574,12 +2578,15 @@ void loop() {
     }
   }
 
-  // RGB LED status: 緑=正常, 赤=Ethernet断, 黄=リレーON中, 青=起動直後
+  // RGB LED status: 緑=正常, 赤/黄交互=W5500未UP, 黄=リレーON中
   static unsigned long lastLedUpdate = 0;
   if (now - lastLedUpdate >= 1000) {
     lastLedUpdate = now;
     if (!eth.connected()) {
-      rgbLED.setPixelColor(0, rgbLED.Color(80, 0, 0));    // 赤=Ethernet断
+      static bool ethDownRedPhase = true;
+      rgbLED.setPixelColor(0, ethDownRedPhase ? rgbLED.Color(80, 0, 0)     // 赤
+                                              : rgbLED.Color(60, 40, 0));  // 黄
+      ethDownRedPhase = !ethDownRedPhase;
     } else if (relayState > 0) {
       rgbLED.setPixelColor(0, rgbLED.Color(60, 40, 0));   // 黄=リレー稼働中
     } else {
