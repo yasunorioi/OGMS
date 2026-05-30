@@ -903,7 +903,7 @@ OGMS は温室全体の制御を司り、外部の単機能 PoE ノードから�
 - **[agri-node-poe-core](https://github.com/yasunorioi/agri-node-poe-core)** — M5Stack ATOM PoE 向け共通ライブラリ（W5500 + lwIP + NVS config + Web UI + MQTT + CCM + mDNS/OTA + LED state machine）
 - **[agri-rain-poe](https://github.com/yasunorioi/agri-rain-poe)** — DFRobot SEN0575 雨量ノード → `WRainfallAmt.cMC`
 - **[agri-env-poe](https://github.com/yasunorioi/agri-env-poe)** — ENV III (SHT30+QMP6988) + SCD41 → `InAirTemp/Humid/Pressure/CO2.cMC`
-- *(planned)* `agri-flow-poe` — DIGITEN 流量計
-- *(planned)* `agri-solar-poe` — M5 ADC Unit v1.1 + PVSS 全天日射計 → `InRadiation.cMC`
+- **[agri-flow-poe](https://github.com/yasunorioi/agri-flow-poe)** — DIGITEN 流量計 → `WaterFlow.cMC` + `WaterCons.cMC`
+- **[agri-solar-poe](https://github.com/yasunorioi/agri-solar-poe)** — M5 ADC Unit v1.1 (ADS1110) + PVSS-03 全天日射計 → `InRadiation.cMC`
 
 兄弟プロジェクトの [ccm_rp2350_relay](https://github.com/yasunorioi/ccm_rp2350_relay) は単体で同等の Web UI + リレー制御を備えています。
