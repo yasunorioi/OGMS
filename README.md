@@ -599,6 +599,24 @@ Direct WebUI/OTA/API access from PC via a single USB-C cable. No LAN cable neede
 
 > **OTA via USB-NCM**: `curl --data-binary @firmware.bin http://192.168.7.1/api/ota` — update firmware without LAN.
 
+### Initial setup procedure (out-of-box)
+
+The USB-NCM path **does not advertise mDNS** (intentional — otherwise the LAN side would see a spurious `192.168.7.1` A record for `hostname.local`). So the operational flow is: **first time, hit the fixed USB-NCM IP directly**, then once on LAN, use `hostname.local`.
+
+```
+1. Plug USB-C into the PC
+2. Browser → http://192.168.7.1/   (this IP is fixed)
+3. /config → set MQTT / CCM / network options
+4. Plug in the LAN cable
+5. From now on → http://uecs-ccm-01.local/   (hostname is editable in /config)
+```
+
+> Sticker template (intended to be applied to the device housing):
+> ```
+> First:  USB → http://192.168.7.1/
+> After:  http://uecs-ccm-01.local/
+> ```
+
 <details>
 <summary>🇯🇵 日本語</summary>
 
@@ -612,6 +630,24 @@ USB-Cケーブル1本でPCからWebUI・OTA・APIにアクセス可能。LANケ�
 | Windows | Windows 10 1703以降ドライバ不要 |
 | Linux/macOS | 標準対応 |
 | シリアルポート | CDC-ACM同時利用可 (COM/ttyACM) |
+
+**初回セットアップ手順（出荷時想定）**
+
+USB-NCM 経路は **mDNS を流していません**（LAN 側に偽の `192.168.7.1` を broadcast しないため意図的）。よって **初回 USB セットアップは固定 IP 直叩き** → 設置後 LAN 接続で `hostname.local` 運用、という二段構え。
+
+```
+1. USB-C ケーブルで PC に接続
+2. ブラウザで http://192.168.7.1/   ← この IP は固定
+3. /config から MQTT / CCM / ネットワーク設定
+4. LAN ケーブルを接続
+5. 以降 http://uecs-ccm-01.local/   ← hostname は /config で変更可
+```
+
+ステッカー文面用テンプレ（本体側面に貼る想定）:
+```
+初回:  USB → http://192.168.7.1/
+設置後: http://uecs-ccm-01.local/
+```
 
 </details>
 
