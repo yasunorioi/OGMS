@@ -26,6 +26,8 @@
 #include <Updater.h>
 #include <Adafruit_NeoPixel.h>
 #include <OneWire.h>
+
+#include <lwip/etharp.h>        // etharp_gratuitous() — static IP path needs explicit gratuitous ARP
 #include <DallasTemperature.h>
 
 #include "sw_watchdog.h"
@@ -372,6 +374,13 @@ String nodeId;
 String nodeName;
 String mdnsHostname;
 int    rs485Baud = RS485_DEFAULT_BAUD;
+
+// Static IP configuration. Loaded by loadConfig(), applied by initEthernet()
+// after ethPtr is constructed. Empty ipCfgStr means DHCP.
+String ipCfgStr;
+String subnetCfgStr;
+String gatewayCfgStr;
+String dnsCfgStr;
 
 // ========== RS485 / SEN0575 ==========
 // Modbus RTU register map (Input Registers, FC=0x04)
@@ -2074,8 +2083,6 @@ void tempRateGuardControl(unsigned long now) {
 // Configuration (LittleFS /config.json)
 // ============================================================
 void loadConfig() {
-  String ipStr = DEFAULT_IP;
-
   if (LittleFS.exists("/config.json")) {
     File file = LittleFS.open("/config.json", "r");
     if (file) {
@@ -2088,20 +2095,13 @@ void loadConfig() {
         nodeId       = (const char*)(doc["node_id"]        | DEFAULT_NODE_ID);
         nodeName     = (const char*)(doc["node_name"]      | DEFAULT_NODE_NAME);
         mdnsHostname = (const char*)(doc["mdns_hostname"]  | DEFAULT_MDNS_HOSTNAME);
-        ipStr        = (const char*)(doc["ip"]             | DEFAULT_IP);
+        ipCfgStr     = (const char*)(doc["ip"]             | DEFAULT_IP);
+        subnetCfgStr = (const char*)(doc["subnet"]         | DEFAULT_SUBNET);
+        gatewayCfgStr= (const char*)(doc["gateway"]        | DEFAULT_GATEWAY);
+        dnsCfgStr    = (const char*)(doc["dns"]            | DEFAULT_DNS);
         rs485Baud    = doc["rs485_baud"] | RS485_DEFAULT_BAUD;
         mdns_enabled = doc["mdns_enabled"] | DEFAULT_MDNS_ENABLED;
         g_language   = doc["language"] | 0;
-
-        if (ipStr.length() > 0) {
-          IPAddress ip, subnet, gw, dns;
-          ip.fromString(ipStr);
-          subnet.fromString((const char*)(doc["subnet"] | DEFAULT_SUBNET));
-          gw.fromString((const char*)(doc["gateway"]    | DEFAULT_GATEWAY));
-          dns.fromString((const char*)(doc["dns"]       | DEFAULT_DNS));
-          eth.config(ip, gw, subnet, dns);
-          Serial.printf("Static IP: %s\n", ipStr.c_str());
-        }
         return;
       }
       Serial.printf("Config parse error: %s\n", err.c_str());
@@ -2112,6 +2112,10 @@ void loadConfig() {
   nodeId       = DEFAULT_NODE_ID;
   nodeName     = DEFAULT_NODE_NAME;
   mdnsHostname = DEFAULT_MDNS_HOSTNAME;
+  ipCfgStr     = DEFAULT_IP;
+  subnetCfgStr = DEFAULT_SUBNET;
+  gatewayCfgStr= DEFAULT_GATEWAY;
+  dnsCfgStr    = DEFAULT_DNS;
 }
 
 void saveLangToConfig() {
@@ -2145,6 +2149,19 @@ void initEthernet() {
   ethPtr = new Wiznet5500lwIP(W5500_CS, SPI, W5500_INT);
 
   lwipPollingPeriod(5);
+
+  // Apply static IP if configured. Must be called after ethPtr is
+  // constructed but before eth.begin() so dhcp_start() is skipped.
+  if (ipCfgStr.length() > 0) {
+    IPAddress ip, subnet, gw, dns;
+    ip.fromString(ipCfgStr);
+    subnet.fromString(subnetCfgStr);
+    gw.fromString(gatewayCfgStr);
+    dns.fromString(dnsCfgStr);
+    eth.config(ip, gw, subnet, dns);
+    Serial.printf("Static IP: %s\n", ipCfgStr.c_str());
+  }
+
   eth.begin();
 
   Serial.println("ETH: waiting for link...");
@@ -2172,6 +2189,15 @@ void initEthernet() {
                 eth.localIP().toString().c_str(),
                 eth.gatewayIP().toString().c_str(),
                 eth.subnetMask().toString().c_str());
+
+  // lwIP's DHCP path sends gratuitous ARP automatically; the static IP path
+  // does not, so switches and peers won't learn our MAC↔IP mapping and
+  // incoming ARP requests from same-segment hosts can fail. Send one
+  // explicitly so the LAN converges.
+  if (ipCfgStr.length() > 0) {
+    etharp_gratuitous(eth.getNetIf());
+    Serial.println("[ETH] gratuitous ARP sent (static IP)");
+  }
 }
 
 // Poll the W5500 PHY link state and recover DHCP when a LAN cable is
@@ -2205,6 +2231,10 @@ void ethLinkPoll() {
     eth.end();
     bool ok = eth.begin();
     if (!ok) Serial.println("[ETH] eth.begin() failed");
+    if (ok && ipCfgStr.length() > 0) {
+      etharp_gratuitous(eth.getNetIf());
+      Serial.println("[ETH] gratuitous ARP sent (static IP, hot-plug)");
+    }
   } else if (cur == LinkOFF && prevLink == LinkON) {
     Serial.println("[ETH] link DOWN");
     netif_set_link_down(eth.getNetIf());
