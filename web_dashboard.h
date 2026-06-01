@@ -13,7 +13,7 @@ function relay(ch,v){
     .then(function(r){return r.json();}).then(function(){busy=false;load();}).catch(function(){busy=false;load();});
 }
 function load(){
-  fetch('/api/state').then(function(r){return r.json();}).then(function(d){
+  fetch('/api/live').then(function(r){return r.json();}).then(function(d){
     var T=d.language==='jp'?{
       net:'\u30cd\u30c3\u30c8\u30ef\u30fc\u30af',devstat:'\u30c7\u30d0\u30a4\u30b9\u72b6\u614b',sensors:'\u30bb\u30f3\u30b5\u30fc',
       on:'\u30aa\u30f3',off:'\u30aa\u30d5',gh:'\u6e29\u5ba4\u5236\u5fa1',irri:'\u65e5\u5c04\u704c\u6c34',prot:'\u4fdd\u8b77\u5236\u5fa1',
@@ -127,37 +127,40 @@ function load(){
     }
   });
 }
-load();setInterval(function(){if(!busy)load();},10000);
+load();setInterval(function(){if(!busy&&!document.hidden)load();},10000);
+document.addEventListener('visibilitychange',function(){if(!document.hidden&&!busy)load();});
 )DASH_JS";
 
 void sendDashboard(WiFiClient& client) {
   sendCommonHead(client, L("MQTT Relay Node", "MQTTリレーノード"));
-  client.println("<style>"
-    ".bon{background:#43a047;color:#fff;border:none;padding:8px 16px;border-radius:3px;cursor:pointer}"
-    ".bof{background:#e53935;color:#fff;border:none;padding:8px 16px;border-radius:3px;cursor:pointer}"
-    ".bon,.bof{transition:transform .05s,filter .05s}"
-    ".bon:active,.bof:active{transform:scale(.92);filter:brightness(.8)}"
-    "#rtbl td{transition:background .15s}"
-    "</style></head><body>");
-  client.printf("<h2>%s</h2>\n", L("MQTT Relay Node", "MQTTリレーノード"));
+  // Build the page skeleton in one buffer and flush in a few writes instead
+  // of ~16 client.println() calls (fewer small TCP segments on the W5500).
+  String h; h.reserve(900);
+  h += "<style>"
+       ".bon{background:#43a047;color:#fff;border:none;padding:8px 16px;border-radius:3px;cursor:pointer}"
+       ".bof{background:#e53935;color:#fff;border:none;padding:8px 16px;border-radius:3px;cursor:pointer}"
+       ".bon,.bof{transition:transform .05s,filter .05s}"
+       ".bon:active,.bof:active{transform:scale(.92);filter:brightness(.8)}"
+       "#rtbl td{transition:background .15s}"
+       "</style></head><body><h2>";
+  h += L("MQTT Relay Node", "MQTTリレーノード");
+  h += "</h2>";
+  client.print(h);
   printNavLinks(client);
-  client.printf("<div class=sec id=sys>%s</div>\n", L("Loading...","読み込み中..."));
-  client.printf("<div class=sec id=net>%s</div>\n", L("Loading...","読み込み中..."));
-  client.printf("<div class=sec id=devstat>%s</div>\n", L("Loading...","読み込み中..."));
-  client.println("<div class=sec>");
-  client.printf("<h3>%s</h3>\n", L("Relay / DI Link", "リレー/DI連動"));
-  client.printf("<table><tr><th>CH</th><th>%s</th><th>%s</th><th>%s</th></tr>\n",
-    L("Channel","チャンネル"), L("State","状態"), L("Control","制御"));
-  client.println("<tbody id=rtbl></tbody></table></div>");
-  client.println("<div class=sec>");
-  client.printf("<h3>%s</h3>\n", L("Digital Input", "デジタル入力"));
-  client.printf("<table><tr><th>CH</th><th>%s</th></tr>\n", L("State","状態"));
-  client.println("<tbody id=dtbl></tbody></table></div>");
-  client.println("<div class=sec id=sens></div>");
-  client.println("<div class=sec id=gh></div>");
-  client.println("<div class=sec id=irri></div>");
-  client.println("<div class=sec id=prot></div>");
-  client.println("<script>");
+  String b; b.reserve(700);
+  b += "<div class=sec id=sys>";    b += L("Loading...","読み込み中..."); b += "</div>";
+  b += "<div class=sec id=net>";    b += L("Loading...","読み込み中..."); b += "</div>";
+  b += "<div class=sec id=devstat>"; b += L("Loading...","読み込み中..."); b += "</div>";
+  b += "<div class=sec><h3>"; b += L("Relay / DI Link", "リレー/DI連動"); b += "</h3>";
+  b += "<table><tr><th>CH</th><th>"; b += L("Channel","チャンネル");
+  b += "</th><th>"; b += L("State","状態"); b += "</th><th>"; b += L("Control","制御");
+  b += "</th></tr><tbody id=rtbl></tbody></table></div>";
+  b += "<div class=sec><h3>"; b += L("Digital Input", "デジタル入力"); b += "</h3>";
+  b += "<table><tr><th>CH</th><th>"; b += L("State","状態");
+  b += "</th></tr><tbody id=dtbl></tbody></table></div>";
+  b += "<div class=sec id=sens></div><div class=sec id=gh></div>"
+       "<div class=sec id=irri></div><div class=sec id=prot></div><script>";
+  client.print(b);
   client.print(DASHBOARD_JS);
-  client.println("</script></body></html>");
+  client.print(F("</script></body></html>"));
 }

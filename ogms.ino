@@ -427,7 +427,7 @@ unsigned long getCurrentEpoch();
 void rebootWithReason(const char* reason);
 void handleWebClient();
 void sendDashboard(WiFiClient& client);
-void sendAPIState(WiFiClient& client);
+void sendAPIState(WiFiClient& client, bool full = true);
 void sendAPIConfig(WiFiClient& client);
 void sendConfigPage(WiFiClient& client);
 void handleRelayPost(WiFiClient& client, int ch, const String& body);
@@ -2320,6 +2320,8 @@ void handleWebClient() {
     sendDashboard(client);
   } else if (method == "GET" && path == "/api/state") {
     sendAPIState(client);
+  } else if (method == "GET" && path == "/api/live") {
+    sendAPIState(client, false);  // slim payload for the dashboard poll
   } else if (method == "GET" && path.startsWith("/api/language")) {
     int qi = path.indexOf("lang=");
     if (qi >= 0) {

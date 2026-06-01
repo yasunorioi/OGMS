@@ -3,20 +3,22 @@
 // ============================================================
 // API: /api/state
 // ============================================================
-void sendAPIState(WiFiClient& client) {
+void sendAPIState(WiFiClient& client, bool full) {
   JsonDocument doc;
   doc["node_id"]    = nodeId;
-  doc["node_name"]  = nodeName;
   doc["version"]    = FW_VERSION;
-  doc["protocol"]   = "MQTT";
   doc["uptime"]     = millis() / 1000;
-  doc["ts"]         = getCurrentEpoch();
   doc["relay_state"] = relayState;
 
-  // Relay claims (arbitration debug)
-  JsonArray claimsArr = doc["relay_claims"].to<JsonArray>();
-  for (int i = 0; i < 8; i++) {
-    claimsArr.add(relayClaims[i]);
+  // Static / debug fields the dashboard poll doesn't need (full only)
+  if (full) {
+    doc["node_name"]  = nodeName;
+    doc["protocol"]   = "MQTT";
+    doc["ts"]         = getCurrentEpoch();
+    JsonArray claimsArr = doc["relay_claims"].to<JsonArray>();
+    for (int i = 0; i < 8; i++) {
+      claimsArr.add(relayClaims[i]);
+    }
   }
 
   // DI as bitmask
@@ -53,9 +55,11 @@ void sendAPIState(WiFiClient& client) {
 
   // Network
   doc["ip"]      = eth.localIP().toString();
-  doc["subnet"]  = eth.subnetMask().toString();
   doc["gateway"] = eth.gatewayIP().toString();
-  doc["dns"]     = eth.dnsIP().toString();
+  if (full) {
+    doc["subnet"]  = eth.subnetMask().toString();
+    doc["dns"]     = eth.dnsIP().toString();
+  }
   doc["sht40_ok"]    = sht40_detected;
   doc["scd41_ok"]    = scd41_detected;
   doc["ds18b20_ok"]  = ds18b20_detected;
@@ -94,18 +98,20 @@ void sendAPIState(WiFiClient& client) {
     g["curve_coeff"] = ghCtrl[i].curve_coeff;
   }
 
-  // Aperture (side window) status
-  JsonArray aptArr = doc["aperture"].to<JsonArray>();
-  for (int i = 0; i < APT_SLOTS; i++) {
-    JsonObject a = aptArr.add<JsonObject>();
-    a["enabled"]     = aptCtrl[i].enabled;
-    a["ch"]          = aptCtrl[i].ch;
-    a["current_pct"] = round(aptRun[i].current_pct * 10) / 10.0;
-    a["target_pct"]  = round(aptRun[i].target_pct * 10) / 10.0;
-    a["moving"]      = aptRun[i].moving;
-    a["initializing"] = aptRun[i].initializing;
-    a["open_sec"]    = aptCtrl[i].open_seconds;
-    a["close_sec"]   = aptCtrl[i].close_seconds;
+  // Aperture (side window) status — not rendered on the dashboard (full only)
+  if (full) {
+    JsonArray aptArr = doc["aperture"].to<JsonArray>();
+    for (int i = 0; i < APT_SLOTS; i++) {
+      JsonObject a = aptArr.add<JsonObject>();
+      a["enabled"]     = aptCtrl[i].enabled;
+      a["ch"]          = aptCtrl[i].ch;
+      a["current_pct"] = round(aptRun[i].current_pct * 10) / 10.0;
+      a["target_pct"]  = round(aptRun[i].target_pct * 10) / 10.0;
+      a["moving"]      = aptRun[i].moving;
+      a["initializing"] = aptRun[i].initializing;
+      a["open_sec"]    = aptCtrl[i].open_seconds;
+      a["close_sec"]   = aptCtrl[i].close_seconds;
+    }
   }
 
   // Irrigation control status
@@ -170,8 +176,8 @@ void sendAPIState(WiFiClient& client) {
     mqttObj["client_id"] = mqttCfg.client_id;
   }
 
-  // Modbus master status
-  {
+  // Modbus master status — not rendered on the dashboard (full only)
+  if (full) {
     JsonObject mbObj = doc["modbus"].to<JsonObject>();
     mbObj["enabled"] = mbMaster.enabled;
     JsonArray slvArr = mbObj["slaves"].to<JsonArray>();
