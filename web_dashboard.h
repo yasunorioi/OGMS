@@ -4,8 +4,13 @@
 // WebUI — Dashboard
 // ============================================================
 static const char DASHBOARD_JS[] PROGMEM = R"DASH_JS(
+var busy=false;var _T={on:'ON',off:'OFF'};
 function relay(ch,v){
-  fetch('/api/relay/'+ch,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:v})}).then(load);
+  var c=document.getElementById('rst'+ch);
+  if(c){c.className=v?'on':'off';c.innerHTML=(v?'✓ '+_T.on:'✗ '+_T.off)+' <span style="opacity:.55">…</span>';}
+  busy=true;
+  fetch('/api/relay/'+ch,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:v})})
+    .then(function(r){return r.json();}).then(function(){busy=false;load();}).catch(function(){busy=false;load();});
 }
 function load(){
   fetch('/api/state').then(function(r){return r.json();}).then(function(d){
@@ -22,6 +27,7 @@ function load(){
       norules:'No rules active',active:'ACTIVE',standby:'Standby',normal:'Normal',
       configure:'Configure',solar:'Solar',irriSolar:'Solar Irrigation'
     };
+    _T=T;
     document.getElementById('sys').innerHTML=
       '<b>Node:</b> '+d.node_id+' | <b>FW:</b> '+d.version+
       ' | <b>Protocol:</b> <span style="color:#29b6f6">MQTT</span>'+
@@ -49,7 +55,7 @@ function load(){
       var m=rch[i]||{};
       var diInfo=m.di_link>=0?(' <span style="color:#29b6f6;font-size:0.85em">DI'+(m.di_link+1)+(m.di_invert?'(inv)':'')+'</span>'):'';
       rt+='<tr><td>'+(i+1)+'</td><td>CH'+(i+1)+diInfo+'</td>'+
-        '<td class="'+(s?'on':'off')+'">'+(s?'\u2713 '+T.on:'\u2717 '+T.off)+'</td>'+
+        '<td id="rst'+(i+1)+'" class="'+(s?'on':'off')+'">'+(s?'\u2713 '+T.on:'\u2717 '+T.off)+'</td>'+
         '<td><button class=bon onclick="relay('+(i+1)+',1)">ON</button> '+
         '<button class=bof onclick="relay('+(i+1)+',0)">OFF</button></td></tr>';
     }
@@ -121,7 +127,7 @@ function load(){
     }
   });
 }
-load();setInterval(load,5000);
+load();setInterval(function(){if(!busy)load();},10000);
 )DASH_JS";
 
 void sendDashboard(WiFiClient& client) {
@@ -129,6 +135,9 @@ void sendDashboard(WiFiClient& client) {
   client.println("<style>"
     ".bon{background:#43a047;color:#fff;border:none;padding:8px 16px;border-radius:3px;cursor:pointer}"
     ".bof{background:#e53935;color:#fff;border:none;padding:8px 16px;border-radius:3px;cursor:pointer}"
+    ".bon,.bof{transition:transform .05s,filter .05s}"
+    ".bon:active,.bof:active{transform:scale(.92);filter:brightness(.8)}"
+    "#rtbl td{transition:background .15s}"
     "</style></head><body>");
   client.printf("<h2>%s</h2>\n", L("MQTT Relay Node", "MQTTリレーノード"));
   printNavLinks(client);
